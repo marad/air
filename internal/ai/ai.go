@@ -7,9 +7,9 @@ import (
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
-	"consistency/internal/config"
-	"consistency/internal/schema"
-	"consistency/internal/util"
+	"air/internal/config"
+	"air/internal/schema"
+	"air/internal/util"
 )
 
 func ModelPath(projectID, location, model string) string {

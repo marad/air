@@ -1,7 +1,7 @@
 package ai
 
 import (
-	"consistency/internal/util"
+	"air/internal/util"
 	"os"
 	"testing"
 )

@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"consistency/internal/ai"
-	"consistency/internal/config"
-	"consistency/internal/schema"
-	"consistency/internal/template"
+	"air/internal/ai"
+	"air/internal/config"
+	"air/internal/schema"
+	"air/internal/template"
 	"github.com/joho/godotenv"
 )
 

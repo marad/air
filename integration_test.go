@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"consistency/internal/config"
-	"consistency/internal/template"
+	"air/internal/config"
+	"air/internal/template"
 )
 
 func TestIntegrationConfigAndTemplate(t *testing.T) {
