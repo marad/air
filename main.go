@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"github.com/joho/godotenv"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 	"gopkg.in/yaml.v3"
 )
 
@@ -244,13 +246,14 @@ func mergeVariables(sources ...map[string]string) map[string]string {
 }
 
 type Config struct {
-	Temperature      *float32          `yaml:"temperature"`
-	TopP             *float32          `yaml:"topP"`
-	MaxTokens        *int32            `yaml:"maxTokens"`
-	ResponseMimeType string            `yaml:"responseMimeType"`
-	Model            string            `yaml:"model"`
-	SafetySettings   map[string]string `yaml:"safetySettings"`
-	Variables        map[string]string `yaml:"variables"`
+	Temperature      *float32                `yaml:"temperature"`
+	TopP             *float32                `yaml:"topP"`
+	MaxTokens        *int32                  `yaml:"maxTokens"`
+	ResponseMimeType string                  `yaml:"responseMimeType"`
+	Model            string                  `yaml:"model"`
+	SafetySettings   map[string]string       `yaml:"safetySettings"`
+	Variables        map[string]string       `yaml:"variables"`
+	ResponseSchema   map[string]interface{}  `yaml:"responseSchema"`
 }
 
 func (c *Config) Validate() error {
@@ -264,6 +267,26 @@ func (c *Config) Validate() error {
 		if _, err := buildSafetySettings(*c); err != nil {
 			return fmt.Errorf("safetySettings: %w", err)
 		}
+	}
+
+	return nil
+}
+
+func (c *Config) ValidateSchema() error {
+	if c.ResponseSchema == nil {
+		return nil
+	}
+
+	// Basic validation - ensure it's a valid JSON schema structure
+	schemaBytes, err := json.Marshal(c.ResponseSchema)
+	if err != nil {
+		return fmt.Errorf("invalid response schema: %w", err)
+	}
+
+	// Use jsonschema library for validation
+	_, err = jsonschema.CompileString("", string(schemaBytes))
+	if err != nil {
+		return fmt.Errorf("invalid JSON schema: %w", err)
 	}
 
 	return nil
@@ -331,6 +354,89 @@ func validateModel(model string) error {
 		return fmt.Errorf("unsupported model: %s (supported: %v)", model, supportedModels)
 	}
 	return nil
+}
+
+func convertSchemaToProtobuf(schema map[string]interface{}) *aiplatformpb.Schema {
+	pbSchema := &aiplatformpb.Schema{}
+
+	typeMap := map[string]aiplatformpb.Type{
+		"string":  aiplatformpb.Type_STRING,
+		"number":  aiplatformpb.Type_NUMBER,
+		"integer": aiplatformpb.Type_INTEGER,
+		"boolean": aiplatformpb.Type_BOOLEAN,
+		"object":  aiplatformpb.Type_OBJECT,
+		"array":   aiplatformpb.Type_ARRAY,
+	}
+
+	if typ, ok := schema["type"].(string); ok {
+		if pbType, exists := typeMap[typ]; exists {
+			pbSchema.Type = pbType
+		}
+	}
+
+	if properties, ok := schema["properties"].(map[string]interface{}); ok {
+		pbSchema.Properties = make(map[string]*aiplatformpb.Schema)
+		for key, val := range properties {
+			if propSchema, ok := val.(map[string]interface{}); ok {
+				pbSchema.Properties[key] = convertSchemaToProtobuf(propSchema)
+			}
+		}
+	}
+
+	if items, ok := schema["items"].(map[string]interface{}); ok {
+		pbSchema.Items = convertSchemaToProtobuf(items)
+	}
+
+	if enum, ok := schema["enum"].([]interface{}); ok {
+		pbSchema.Enum = make([]string, len(enum))
+		for i, val := range enum {
+			if str, ok := val.(string); ok {
+				pbSchema.Enum[i] = str
+			}
+		}
+	}
+
+	if required, ok := schema["required"].([]interface{}); ok {
+		pbSchema.Required = make([]string, len(required))
+		for i, val := range required {
+			if str, ok := val.(string); ok {
+				pbSchema.Required[i] = str
+			}
+		}
+	}
+
+	return pbSchema
+}
+
+func formatResponse(response string) (string, error) {
+	var jsonData interface{}
+	if err := json.Unmarshal([]byte(response), &jsonData); err != nil {
+		return response, nil // If not JSON, return as is
+	}
+	formatted, err := json.MarshalIndent(jsonData, "", "  ")
+	if err != nil {
+		return response, nil
+	}
+	return string(formatted), nil
+}
+
+func validateResponse(response string, schema map[string]interface{}) error {
+	schemaBytes, err := json.Marshal(schema)
+	if err != nil {
+		return fmt.Errorf("failed to marshal schema: %w", err)
+	}
+
+	sch, err := jsonschema.CompileString("", string(schemaBytes))
+	if err != nil {
+		return fmt.Errorf("failed to compile schema: %w", err)
+	}
+
+	var data interface{}
+	if err := json.Unmarshal([]byte(response), &data); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return sch.Validate(data)
 }
 
 func parseHarmCategory(category string) (aiplatformpb.HarmCategory, error) {
@@ -430,6 +536,10 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 		SafetySettings: safetySettings,
 	}
 
+	if config.ResponseSchema != nil {
+		req.GenerationConfig.ResponseSchema = convertSchemaToProtobuf(config.ResponseSchema)
+	}
+
 	resp, err := client.GenerateContent(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
@@ -448,6 +558,14 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 	if text == "" {
 		return "", fmt.Errorf("no text content in response")
 	}
+
+	// Validate response against schema if provided
+	if config.ResponseSchema != nil {
+		if err := validateResponse(text, config.ResponseSchema); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: response does not match schema: %v\n", err)
+		}
+	}
+
 	return text, nil
 }
 
@@ -503,5 +621,15 @@ func main() {
 		fatalf("Error calling AI: %v", err)
 	}
 	
-	fmt.Println(result)
+	if config.ResponseSchema != nil {
+		formatted, err := formatResponse(result)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to format response: %v\n", err)
+			fmt.Println(result)
+		} else {
+			fmt.Println(formatted)
+		}
+	} else {
+		fmt.Println(result)
+	}
 }

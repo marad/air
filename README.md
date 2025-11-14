@@ -101,25 +101,38 @@ working on.
 
 ### Output Schema Configuration
 
-You can also provide the expected response schema  within the YAML. For example this schema:
+You can provide the expected response schema within the YAML frontmatter. When specified, AIR will:
+
+- Request structured JSON output from the AI model
+- Validate the response against the schema
+- Pretty-print the JSON response for readability
+
+Example:
 
 ```yaml
+---
 responseSchema:
-  type: array
-  items: 
-    type: object
-    properties: 
-      field_one: string 
-      field_two: integer
+  type: object
+  properties:
+    name:
+      type: string
+    age:
+      type: integer
+  required:
+    - name
+    - age
+---
 ```
 
-Should make the response conform to a JSON in the form:
+This should produce a response like:
 
-```json 
-[
-  { "field_one": "foo", "field_two": 42 }
-  // ...
-]
+```json
+{
+  "name": "Alice",
+  "age": 30
+}
 ```
+
+If the response doesn't match the schema, a warning will be printed to stderr, but the response is still returned.
 
 
