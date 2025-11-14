@@ -21,6 +21,9 @@ type Config struct {
 	MaxTokens        *int32   `yaml:"maxTokens"`
 	ResponseMimeType string   `yaml:"responseMimeType"` // "application/json" or "text/plain"
 
+	// Model selection
+	Model string `yaml:"model"` // e.g., "gemini-2.0-flash-001", "gemini-1.5-pro"
+
 	// Safety settings (optional)
 	SafetySettings map[string]string `yaml:"safetySettings"`
 }
@@ -69,6 +72,25 @@ func blockNoSafetySettings() []*aiplatformpb.SafetySetting {
 		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
 		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
 	}
+}
+
+func validateModel(model string) error {
+	// List of supported models
+	supportedModels := []string{
+		"gemini-2.0-flash-001",
+		"gemini-1.5-pro-002",
+		"gemini-1.5-pro-001",
+		"gemini-1.5-flash-002",
+		"gemini-1.5-flash-001",
+	}
+
+	for _, supported := range supportedModels {
+		if model == supported {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unsupported model: %s (supported: %v)", model, supportedModels)
 }
 
 func parseHarmCategory(category string) (aiplatformpb.HarmCategory, error) {
@@ -140,6 +162,15 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable not set")
 	}
 
+	// Model selection with default
+	model := "gemini-2.0-flash-001"
+	if config.Model != "" {
+		if err := validateModel(config.Model); err != nil {
+			return "", err
+		}
+		model = config.Model
+	}
+
 	client, err := aiplatform.NewPredictionClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to create client: %w", err)
@@ -174,7 +205,7 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 	}
 
 	req := &aiplatformpb.GenerateContentRequest{
-		Model: fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/gemini-2.0-flash-001", projectID, location),
+		Model: fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model),
 		Contents: []*aiplatformpb.Content{
 			{
 				Role: "user",
