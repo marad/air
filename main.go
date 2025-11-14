@@ -174,6 +174,76 @@ func replacePlaceholders(content string, variables map[string]string) (string, e
 	return result, nil
 }
 
+func parseVarFlags(args []string) (map[string]string, []string, error) {
+	vars := make(map[string]string)
+	remaining := []string{}
+	
+	i := 0
+	for i < len(args) {
+		arg := args[i]
+		
+		if arg == "--var" || arg == "-v" {
+			if i+1 >= len(args) {
+				return nil, nil, fmt.Errorf("--var requires an argument")
+			}
+			
+			i++
+			varDef := args[i]
+			
+			// Parse "key=value"
+			parts := strings.SplitN(varDef, "=", 2)
+			if len(parts) != 2 {
+				return nil, nil, fmt.Errorf("invalid --var format: %s (expected key=value)", varDef)
+			}
+			
+			vars[parts[0]] = parts[1]
+		} else {
+			remaining = append(remaining, arg)
+		}
+		
+		i++
+	}
+	
+	return vars, remaining, nil
+}
+
+func getEnvVariables() map[string]string {
+	vars := make(map[string]string)
+	
+	// Get all environment variables
+	for _, env := range os.Environ() {
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) == 2 {
+			// Store with original case for now
+			vars[parts[0]] = parts[1]
+		}
+	}
+	
+	return vars
+}
+
+func mergeVariables(cliVars, frontmatterVars, envVars map[string]string) map[string]string {
+	// Priority: CLI > frontmatter > env
+	result := make(map[string]string)
+	
+	// Start with env vars (lowest priority)
+	for k, v := range envVars {
+		result[k] = v
+	}
+	
+	// Override with frontmatter vars
+	for k, v := range frontmatterVars {
+		result[k] = v
+	}
+	
+	// Override with CLI vars (highest priority)
+	for k, v := range cliVars {
+		result[k] = v
+	}
+	
+	return result
+}
+
 type Config struct {
 	Temperature      *float32          `yaml:"temperature"`
 	TopP             *float32          `yaml:"topP"`
@@ -216,8 +286,13 @@ func parseFrontmatter(content []byte) (Config, string, error) {
 	}
 
 	var config Config
-	if err := yaml.Unmarshal(parts[0][len(prefix):], &config); err != nil {
-		return Config{}, "", fmt.Errorf("failed to parse YAML: %w", err)
+	if len(parts[0]) >= len(prefix) {
+		yamlContent := parts[0][len(prefix):]
+		if len(yamlContent) > 0 {
+			if err := yaml.Unmarshal(yamlContent, &config); err != nil {
+				return Config{}, "", fmt.Errorf("failed to parse YAML: %w", err)
+			}
+		}
 	}
 
 	markdown := string(parts[1])
@@ -379,51 +454,55 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 
 func main() {
 	loadEnv()
-
-	if len(os.Args) < 2 {
-		fatalf("Usage: %s <template_file>", os.Args[0])
+	
+	// Parse CLI flags for variables
+	cliVars, args, err := parseVarFlags(os.Args[1:])
+	if err != nil {
+		fatalf("Error parsing flags: %v", err)
 	}
-
-	templateFile := os.Args[1]
-
+	
+	if len(args) < 1 {
+		fatalf("Usage: %s [--var key=value ...] <template_file>", os.Args[0])
+	}
+	
+	templateFile := args[0]
+	
 	content, err := os.ReadFile(templateFile)
 	if err != nil {
 		fatalf("Error reading file %s: %v", templateFile, err)
 	}
-
+	
 	// Process includes BEFORE parsing frontmatter
 	ctx := newInclusionContext(templateFile)
 	contentWithIncludes, err := processIncludes(string(content), ctx)
 	if err != nil {
 		fatalf("Error processing includes: %v", err)
 	}
-
+	
 	config, markdown, err := parseFrontmatter([]byte(contentWithIncludes))
 	if err != nil {
 		fatalf("Error parsing template: %v", err)
 	}
-
+	
 	if err := config.Validate(); err != nil {
 		fatalf("Invalid configuration: %v", err)
 	}
-
-	// For now, use only frontmatter variables for placeholder replacement
-	variables := config.Variables
-	if variables == nil {
-		variables = make(map[string]string)
-	}
-
+	
+	// Merge variables (CLI > frontmatter > env)
+	envVars := getEnvVariables()
+	variables := mergeVariables(cliVars, config.Variables, envVars)
+	
 	// Replace placeholders
 	finalMarkdown, err := replacePlaceholders(markdown, variables)
 	if err != nil {
 		fatalf("Error replacing placeholders: %v", err)
 	}
-
+	
 	ctxAI := context.Background()
 	result, err := callVertexAI(ctxAI, config, finalMarkdown)
 	if err != nil {
 		fatalf("Error calling AI: %v", err)
 	}
-
+	
 	fmt.Println(result)
 }
