@@ -182,7 +182,7 @@ func ParseSafetyThreshold(threshold string) (aiplatform.SafetySetting_HarmBlockT
 
 func BuildSafetySettings(config Config) ([]*aiplatform.SafetySetting, error) {
 	if len(config.SafetySettings) == 0 {
-		return BlockNoSafetySettings(), nil
+		return DefaultSafetySettings(), nil
 	}
 
 	settings := make([]*aiplatform.SafetySetting, 0, len(config.SafetySettings))
@@ -206,7 +206,7 @@ func BuildSafetySettings(config Config) ([]*aiplatform.SafetySetting, error) {
 	return settings, nil
 }
 
-func BlockNoSafetySettings() []*aiplatform.SafetySetting {
+func DefaultSafetySettings() []*aiplatform.SafetySetting {
 	return []*aiplatform.SafetySetting{
 		{Category: aiplatform.HarmCategory_HARM_CATEGORY_HATE_SPEECH, Threshold: aiplatform.SafetySetting_BLOCK_NONE},
 		{Category: aiplatform.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT, Threshold: aiplatform.SafetySetting_BLOCK_NONE},

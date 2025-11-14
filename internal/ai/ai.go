@@ -37,6 +37,9 @@ func buildRequest(cfg config.Config, prompt, projectID, location string) (*aipla
 		return nil, fmt.Errorf("invalid safety settings: %w", err)
 	}
 
+	// Note: we take addresses of local variables (temperature, topP, maxTokens)
+	// to set the protobuf GenerationConfig fields. This is intentional; in Go
+	// these locals will escape to the heap so the pointers remain valid.
 	req := &aiplatformpb.GenerateContentRequest{
 		Model: ModelPath(projectID, location, model),
 		Contents: []*aiplatformpb.Content{

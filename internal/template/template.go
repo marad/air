@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -29,7 +30,8 @@ func ResolveAbsolutePath(path, baseDir string) (string, error) {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(baseDir, path)
 	}
-	return filepath.Abs(path)
+	cleaned := filepath.Clean(path)
+	return filepath.Abs(cleaned)
 }
 
 // validatePathSecurity ensures the include path doesn't escape the project directory
@@ -38,7 +40,11 @@ func validatePathSecurity(absPath string) error {
 	if err != nil {
 		return fmt.Errorf("getting project root: %w", err)
 	}
-	if !strings.HasPrefix(absPath, projectRoot) {
+	rel, err := filepath.Rel(projectRoot, absPath)
+	if err != nil {
+		return fmt.Errorf("resolving path relation: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("include path is outside the project directory")
 	}
 	return nil
@@ -75,20 +81,20 @@ func ProcessIncludes(content string, ctx *InclusionContext) (string, error) {
 	lastIndex := 0
 
 	for {
-		matches := IncludePattern.FindStringSubmatch(content[lastIndex:])
-		if matches == nil {
-			result.WriteString(content[lastIndex:])
+		sub := content[lastIndex:]
+		idxs := IncludePattern.FindStringSubmatchIndex(sub)
+		if idxs == nil {
+			result.WriteString(sub)
 			break
 		}
 
-		// Calculate absolute position
-		matchStart := lastIndex + strings.Index(content[lastIndex:], matches[0])
-		matchEnd := matchStart + len(matches[0])
+		// idxs[0], idxs[1] are start/end of full match; idxs[2],idxs[3] are the first capture group
+		matchStart := lastIndex + idxs[0]
+		matchEnd := lastIndex + idxs[1]
+		includePath := sub[idxs[2]:idxs[3]]
 
 		// Write content before match
 		result.WriteString(content[lastIndex:matchStart])
-
-		includePath := matches[1]
 
 		// Resolve path relative to current file's directory
 		absPath, err := ResolveAbsolutePath(includePath, ctx.BaseDir)
@@ -120,7 +126,7 @@ func ProcessIncludes(content string, ctx *InclusionContext) (string, error) {
 }
 
 func ReplacePlaceholders(content string, variables map[string]string) (string, error) {
-	var missing []string
+	missingMap := make(map[string]struct{})
 
 	result := PlaceholderPattern.ReplaceAllStringFunc(content, func(match string) string {
 		submatches := PlaceholderPattern.FindStringSubmatch(match)
@@ -138,12 +144,17 @@ func ReplacePlaceholders(content string, variables map[string]string) (string, e
 		}
 
 		// No value and no default - track as missing
-		missing = append(missing, varName)
+		missingMap[varName] = struct{}{}
 		return match
 	})
 
-	if len(missing) > 0 {
-		return "", fmt.Errorf("undefined variables without defaults: %v", missing)
+	if len(missingMap) > 0 {
+		missingList := make([]string, 0, len(missingMap))
+		for k := range missingMap {
+			missingList = append(missingList, k)
+		}
+		sort.Strings(missingList)
+		return "", fmt.Errorf("undefined variables without defaults: %v", missingList)
 	}
 
 	return result, nil
