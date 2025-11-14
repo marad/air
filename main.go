@@ -20,6 +20,9 @@ type Config struct {
 	TopP             *float32 `yaml:"topP"`
 	MaxTokens        *int32   `yaml:"maxTokens"`
 	ResponseMimeType string   `yaml:"responseMimeType"` // "application/json" or "text/plain"
+
+	// Safety settings (optional)
+	SafetySettings map[string]string `yaml:"safetySettings"`
 }
 
 func parseFrontmatter(content []byte) (Config, string, error) {
@@ -68,6 +71,64 @@ func blockNoSafetySettings() []*aiplatformpb.SafetySetting {
 	}
 }
 
+func parseHarmCategory(category string) (aiplatformpb.HarmCategory, error) {
+	switch category {
+	case "hate_speech":
+		return aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH, nil
+	case "dangerous_content":
+		return aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT, nil
+	case "sexually_explicit":
+		return aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT, nil
+	case "harassment":
+		return aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT, nil
+	default:
+		return 0, fmt.Errorf("unknown harm category: %s", category)
+	}
+}
+
+func parseSafetyThreshold(threshold string) (aiplatformpb.SafetySetting_HarmBlockThreshold, error) {
+	switch threshold {
+	case "BLOCK_NONE":
+		return aiplatformpb.SafetySetting_BLOCK_NONE, nil
+	case "BLOCK_ONLY_HIGH":
+		return aiplatformpb.SafetySetting_BLOCK_ONLY_HIGH, nil
+	case "BLOCK_MEDIUM_AND_ABOVE":
+		return aiplatformpb.SafetySetting_BLOCK_MEDIUM_AND_ABOVE, nil
+	case "BLOCK_LOW_AND_ABOVE":
+		return aiplatformpb.SafetySetting_BLOCK_LOW_AND_ABOVE, nil
+	default:
+		return 0, fmt.Errorf("unknown safety threshold: %s", threshold)
+	}
+}
+
+func buildSafetySettings(config Config) ([]*aiplatformpb.SafetySetting, error) {
+	// Default: BLOCK_NONE for all categories
+	if len(config.SafetySettings) == 0 {
+		return blockNoSafetySettings(), nil
+	}
+
+	// Build custom settings
+	var settings []*aiplatformpb.SafetySetting
+	for categoryStr, thresholdStr := range config.SafetySettings {
+		category, err := parseHarmCategory(categoryStr)
+		if err != nil {
+			return nil, fmt.Errorf("safety settings: %w", err)
+		}
+
+		threshold, err := parseSafetyThreshold(thresholdStr)
+		if err != nil {
+			return nil, fmt.Errorf("safety settings: %w", err)
+		}
+
+		settings = append(settings, &aiplatformpb.SafetySetting{
+			Category:  category,
+			Threshold: threshold,
+		})
+	}
+
+	return settings, nil
+}
+
 func callVertexAI(ctx context.Context, config Config, prompt string) (string, error) {
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
@@ -106,8 +167,11 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 		responseMimeType = config.ResponseMimeType
 	}
 
-	// Safety settings
-	safetySettings := blockNoSafetySettings()
+	// Build safety settings
+	safetySettings, err := buildSafetySettings(config)
+	if err != nil {
+		return "", fmt.Errorf("invalid safety settings: %w", err)
+	}
 
 	req := &aiplatformpb.GenerateContentRequest{
 		Model: fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/gemini-2.0-flash-001", projectID, location),
