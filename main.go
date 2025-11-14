@@ -5,10 +5,48 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"strings"
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	"gopkg.in/yaml.v3"
 )
+
+type Config struct {
+	// Fields will expand in Milestone 2
+	// For now, just parse and ignore
+}
+
+func parseFrontmatter(content []byte) (Config, string, error) {
+	// Split by "---" delimiters
+	// First "---" starts frontmatter
+	// Second "---" ends frontmatter
+	// Everything after is markdown content
+
+	var config Config
+	lines := string(content)
+
+	// Check if file starts with "---"
+	if !strings.HasPrefix(lines, "---\n") {
+		// No frontmatter, entire content is markdown
+		return config, lines, nil
+	}
+
+	// Find second "---"
+	parts := strings.SplitN(lines[4:], "\n---\n", 2)
+	if len(parts) < 2 {
+		return config, "", fmt.Errorf("invalid frontmatter: missing closing ---")
+	}
+
+	// Parse YAML
+	err := yaml.Unmarshal([]byte(parts[0]), &config)
+	if err != nil {
+		return config, "", fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	// Return config and markdown content
+	return config, strings.TrimSpace(parts[1]), nil
+}
 
 func callVertexAI(ctx context.Context, prompt string) (string, error) {
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
@@ -97,8 +135,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: Parse frontmatter and content
-	_ = content // Placeholder until we implement parsing
+	// Parse frontmatter
+	config, markdown, err := parseFrontmatter(content)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing template: %v\n", err)
+		os.Exit(1)
+	}
+	_ = config   // Will use in Milestone 2
+	_ = markdown // Will use in integration
 
 	ctx := context.Background()
 
