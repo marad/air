@@ -6,6 +6,8 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"slices"
 
@@ -55,6 +57,82 @@ var safetyThresholdMap = map[string]aiplatformpb.SafetySetting_HarmBlockThreshol
 	"BLOCK_ONLY_HIGH":        aiplatformpb.SafetySetting_BLOCK_ONLY_HIGH,
 	"BLOCK_MEDIUM_AND_ABOVE": aiplatformpb.SafetySetting_BLOCK_MEDIUM_AND_ABOVE,
 	"BLOCK_LOW_AND_ABOVE":    aiplatformpb.SafetySetting_BLOCK_LOW_AND_ABOVE,
+}
+
+// inclusionContext tracks processed files to detect circular includes
+type inclusionContext struct {
+	visited map[string]bool
+	baseDir string
+}
+
+func newInclusionContext(initialFile string) *inclusionContext {
+	return &inclusionContext{
+		visited: make(map[string]bool),
+		baseDir: filepath.Dir(initialFile),
+	}
+}
+
+var includePattern = regexp.MustCompile(`\{\{include\s+"([^"]+)"\}\}`)
+
+func processIncludes(content string, ctx *inclusionContext) (string, error) {
+	result := content
+	
+	for {
+		matches := includePattern.FindStringSubmatch(result)
+		if matches == nil {
+			// No more includes found
+			break
+		}
+		
+		includePath := matches[1]
+		fullMatch := matches[0]
+		
+		// Resolve path (relative to current file's directory)
+		resolvedPath := includePath
+		if !filepath.IsAbs(includePath) {
+			resolvedPath = filepath.Join(ctx.baseDir, includePath)
+		}
+		
+		// Normalize path for circular detection
+		absPath, err := filepath.Abs(resolvedPath)
+		if err != nil {
+			return "", fmt.Errorf("resolving include path %s: %w", includePath, err)
+		}
+		
+		// Check for circular includes
+		if ctx.visited[absPath] {
+			return "", fmt.Errorf("circular include detected: %s", includePath)
+		}
+		
+		// Mark as visited
+		ctx.visited[absPath] = true
+		
+		// Read included file
+		includedContent, err := os.ReadFile(absPath)
+		if err != nil {
+			return "", fmt.Errorf("reading included file %s: %w", includePath, err)
+		}
+		
+		// Recursively process includes in the included file
+		// Update baseDir for nested includes
+		oldBaseDir := ctx.baseDir
+		ctx.baseDir = filepath.Dir(absPath)
+		
+		processedContent, err := processIncludes(string(includedContent), ctx)
+		if err != nil {
+			return "", err
+		}
+		
+		ctx.baseDir = oldBaseDir
+		
+		// Replace the include directive with processed content
+		result = strings.Replace(result, fullMatch, processedContent, 1)
+		
+		// Unmark for other branches (allows same file in different paths)
+		delete(ctx.visited, absPath)
+	}
+	
+	return result, nil
 }
 
 type Config struct {
@@ -273,7 +351,14 @@ func main() {
 		fatalf("Error reading file %s: %v", templateFile, err)
 	}
 
-	config, markdown, err := parseFrontmatter(content)
+	// Process includes BEFORE parsing frontmatter
+	ctx := newInclusionContext(templateFile)
+	contentWithIncludes, err := processIncludes(string(content), ctx)
+	if err != nil {
+		fatalf("Error processing includes: %v", err)
+	}
+
+	config, markdown, err := parseFrontmatter([]byte(contentWithIncludes))
 	if err != nil {
 		fatalf("Error parsing template: %v", err)
 	}
@@ -282,8 +367,8 @@ func main() {
 		fatalf("Invalid configuration: %v", err)
 	}
 
-	ctx := context.Background()
-	result, err := callVertexAI(ctx, config, markdown)
+	ctxAI := context.Background()
+	result, err := callVertexAI(ctxAI, config, markdown)
 	if err != nil {
 		fatalf("Error calling AI: %v", err)
 	}
