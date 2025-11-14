@@ -1,0 +1,3 @@
+---
+---
+Hello {{name}}! You are {{age}} years old and live in {{city}}.

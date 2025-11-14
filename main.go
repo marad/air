@@ -1,110 +1,25 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"fmt"
 	"os"
-	"strings"
-	"slices"
 
-	aiplatform "cloud.google.com/go/aiplatform/apiv1"
-	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	"air/internal/ai"
+	"air/internal/config"
+	"air/internal/schema"
+	"air/internal/template"
 	"github.com/joho/godotenv"
-	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultLocation         = "europe-west1"
-	defaultTemperature      = float32(0.0)
-	defaultTopP             = float32(0.95)
-	defaultMaxTokens        = int32(8192)
-	defaultResponseMimeType = "application/json"
-	defaultModel            = "gemini-2.0-flash-001"
+	ExitSuccess       = 0
+	ExitInvalidArgs   = 2
+	ExitFileError     = 3
+	ExitConfigError   = 4
+	ExitTemplateError = 5
+	ExitAIError       = 6
 )
-
-// valueOrDefault returns the dereferenced value if ptr is non-nil, otherwise returns defaultVal.
-func valueOrDefault[T any](ptr *T, defaultVal T) T {
-	if ptr != nil {
-		return *ptr
-	}
-	return defaultVal
-}
-
-func getEnvOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultVal
-}
-
-func modelPath(projectID, location, model string) string {
-	return fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model)
-}
-
-var harmCategoryMap = map[string]aiplatformpb.HarmCategory{
-	"hate_speech":       aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH,
-	"dangerous_content": aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT,
-	"sexually_explicit": aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT,
-	"harassment":        aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT,
-}
-
-var safetyThresholdMap = map[string]aiplatformpb.SafetySetting_HarmBlockThreshold{
-	"BLOCK_NONE":             aiplatformpb.SafetySetting_BLOCK_NONE,
-	"BLOCK_ONLY_HIGH":        aiplatformpb.SafetySetting_BLOCK_ONLY_HIGH,
-	"BLOCK_MEDIUM_AND_ABOVE": aiplatformpb.SafetySetting_BLOCK_MEDIUM_AND_ABOVE,
-	"BLOCK_LOW_AND_ABOVE":    aiplatformpb.SafetySetting_BLOCK_LOW_AND_ABOVE,
-}
-
-type Config struct {
-	Temperature      *float32          `yaml:"temperature"`
-	TopP             *float32          `yaml:"topP"`
-	MaxTokens        *int32            `yaml:"maxTokens"`
-	ResponseMimeType string            `yaml:"responseMimeType"`
-	Model            string            `yaml:"model"`
-	SafetySettings   map[string]string `yaml:"safetySettings"`
-}
-
-func (c *Config) Validate() error {
-	if c.Model != "" {
-		if err := validateModel(c.Model); err != nil {
-			return fmt.Errorf("model: %w", err)
-		}
-	}
-
-	if len(c.SafetySettings) > 0 {
-		if _, err := buildSafetySettings(*c); err != nil {
-			return fmt.Errorf("safetySettings: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func parseFrontmatter(content []byte) (Config, string, error) {
-	const prefix = "---\n"
-	const delimiter = "\n---\n"
-
-	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
-
-	if !bytes.HasPrefix(content, []byte(prefix)) {
-		return Config{}, string(content), nil
-	}
-
-	parts := bytes.SplitN(content, []byte(delimiter), 2)
-	if len(parts) < 2 {
-		return Config{}, "", fmt.Errorf("invalid frontmatter: missing closing ---")
-	}
-
-	var config Config
-	if err := yaml.Unmarshal(parts[0][len(prefix):], &config); err != nil {
-		return Config{}, "", fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	markdown := string(parts[1])
-	return config, strings.TrimSpace(markdown), nil
-}
 
 func loadEnv() {
 	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
@@ -112,181 +27,66 @@ func loadEnv() {
 	}
 }
 
-func fatalf(format string, args ...interface{}) {
+func fatalf(exitCode int, format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(1)
-}
-
-func blockNoSafetySettings() []*aiplatformpb.SafetySetting {
-	return []*aiplatformpb.SafetySetting{
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-	}
-}
-
-func validateModel(model string) error {
-	supportedModels := []string{
-		"gemini-2.0-flash-001",
-		"gemini-1.5-pro-002",
-		"gemini-1.5-pro-001",
-		"gemini-1.5-flash-002",
-		"gemini-1.5-flash-001",
-	}
-
-	if !slices.Contains(supportedModels, model) {
-		return fmt.Errorf("unsupported model: %s (supported: %v)", model, supportedModels)
-	}
-	return nil
-}
-
-func parseHarmCategory(category string) (aiplatformpb.HarmCategory, error) {
-	if v, ok := harmCategoryMap[category]; ok {
-		return v, nil
-	}
-	return 0, fmt.Errorf("unknown harm category: %s", category)
-}
-
-func parseSafetyThreshold(threshold string) (aiplatformpb.SafetySetting_HarmBlockThreshold, error) {
-	if v, ok := safetyThresholdMap[threshold]; ok {
-		return v, nil
-	}
-	return 0, fmt.Errorf("unknown safety threshold: %s", threshold)
-}
-
-func buildSafetySettings(config Config) ([]*aiplatformpb.SafetySetting, error) {
-	if len(config.SafetySettings) == 0 {
-		return blockNoSafetySettings(), nil
-	}
-
-	settings := make([]*aiplatformpb.SafetySetting, 0, len(config.SafetySettings))
-	for categoryStr, thresholdStr := range config.SafetySettings {
-		category, err := parseHarmCategory(categoryStr)
-		if err != nil {
-			return nil, fmt.Errorf("safety settings: %w", err)
-		}
-
-		threshold, err := parseSafetyThreshold(thresholdStr)
-		if err != nil {
-			return nil, fmt.Errorf("safety settings: %w", err)
-		}
-
-		settings = append(settings, &aiplatformpb.SafetySetting{
-			Category:  category,
-			Threshold: threshold,
-		})
-	}
-
-	return settings, nil
-}
-
-func callVertexAI(ctx context.Context, config Config, prompt string) (string, error) {
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-	if projectID == "" {
-		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable not set")
-	}
-	location := getEnvOrDefault("GOOGLE_CLOUD_LOCATION", defaultLocation)
-
-	model := defaultModel
-	if config.Model != "" {
-		if err := validateModel(config.Model); err != nil {
-			return "", err
-		}
-		model = config.Model
-	}
-
-	if err := config.Validate(); err != nil {
-		return "", err
-	}
-
-	client, err := aiplatform.NewPredictionClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create client: %w", err)
-	}
-	defer client.Close()
-
-	temperature := valueOrDefault(config.Temperature, defaultTemperature)
-	topP := valueOrDefault(config.TopP, defaultTopP)
-	maxTokens := valueOrDefault(config.MaxTokens, defaultMaxTokens)
-	responseMimeType := defaultResponseMimeType
-	if config.ResponseMimeType != "" {
-		responseMimeType = config.ResponseMimeType
-	}
-
-	safetySettings, err := buildSafetySettings(config)
-	if err != nil {
-		return "", fmt.Errorf("invalid safety settings: %w", err)
-	}
-
-	req := &aiplatformpb.GenerateContentRequest{
-		Model: modelPath(projectID, location, model),
-		Contents: []*aiplatformpb.Content{
-			{
-				Role: "user",
-				Parts: []*aiplatformpb.Part{
-					{Data: &aiplatformpb.Part_Text{Text: prompt}},
-				},
-			},
-		},
-		GenerationConfig: &aiplatformpb.GenerationConfig{
-			Temperature:      &temperature,
-			TopP:             &topP,
-			MaxOutputTokens:  &maxTokens,
-			ResponseMimeType: responseMimeType,
-		},
-		SafetySettings: safetySettings,
-	}
-
-	resp, err := client.GenerateContent(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate content: %w", err)
-	}
-
-	if len(resp.Candidates) == 0 {
-		return "", fmt.Errorf("no response candidates from model")
-	}
-	candidate := resp.Candidates[0]
-	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response from model")
-	}
-
-	// Return the first non-empty text part (prefer first part)
-	text := candidate.Content.Parts[0].GetText()
-	if text == "" {
-		return "", fmt.Errorf("no text content in response")
-	}
-	return text, nil
+	os.Exit(exitCode)
 }
 
 func main() {
 	loadEnv()
 
-	if len(os.Args) < 2 {
-		fatalf("Usage: %s <template_file>", os.Args[0])
+	// Parse CLI flags for variables
+	cliVars, args, err := template.ParseVarFlags(os.Args[1:])
+	if err != nil {
+		fatalf(ExitInvalidArgs, "Error parsing flags: %v", err)
 	}
 
-	templateFile := os.Args[1]
+	if len(args) < 1 {
+		fatalf(ExitInvalidArgs, "Usage: %s [--var key=value ...] <template_file>", os.Args[0])
+	}
+
+	templateFile := args[0]
 
 	content, err := os.ReadFile(templateFile)
 	if err != nil {
-		fatalf("Error reading file %s: %v", templateFile, err)
+		fatalf(ExitFileError, "Error reading file %s: %v", templateFile, err)
 	}
 
-	config, markdown, err := parseFrontmatter(content)
+	// Process includes BEFORE parsing frontmatter
+	includeCtx := template.NewInclusionContext(templateFile)
+	contentWithIncludes, err := template.ProcessIncludes(string(content), includeCtx)
 	if err != nil {
-		fatalf("Error parsing template: %v", err)
+		fatalf(ExitTemplateError, "Error processing includes: %v", err)
 	}
 
-	if err := config.Validate(); err != nil {
-		fatalf("Invalid configuration: %v", err)
+	cfg, markdown, err := config.ParseFrontmatter([]byte(contentWithIncludes))
+	if err != nil {
+		fatalf(ExitConfigError, "Error parsing template: %v", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		fatalf(ExitConfigError, "Invalid configuration: %v", err)
+	}
+
+	// Merge variables (CLI > frontmatter > env)
+	envVars := template.GetEnvVariables()
+	variables := template.MergeVariables(envVars, cfg.Variables, cliVars)
+
+	// Replace placeholders
+	finalMarkdown, err := template.ReplacePlaceholders(markdown, variables)
+	if err != nil {
+		fatalf(ExitTemplateError, "Error replacing placeholders: %v", err)
 	}
 
 	ctx := context.Background()
-	result, err := callVertexAI(ctx, config, markdown)
+	result, err := ai.CallVertexAI(ctx, cfg, finalMarkdown)
 	if err != nil {
-		fatalf("Error calling AI: %v", err)
+		fatalf(ExitAIError, "Error calling AI: %v", err)
 	}
 
-	fmt.Println(result)
+	output := result
+	if cfg.ResponseSchema != nil {
+		output = schema.FormatResponse(result)
+	}
+	fmt.Println(output)
 }
