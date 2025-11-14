@@ -157,13 +157,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error parsing template: %v\n", err)
 		os.Exit(1)
 	}
-	_ = config   // Will use in Milestone 2
-	_ = markdown // Will use in integration
+	_ = config // Will use in Milestone 2
 
+	// Call AI with markdown content
 	ctx := context.Background()
-
-	result, err := callVertexAI(ctx, "Hello World") // Still hardcoded for now
-
+	result, err := callVertexAI(ctx, markdown)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error calling AI: %v\n", err)
 		os.Exit(1)
