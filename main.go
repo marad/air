@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"slices"
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
@@ -14,32 +15,83 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	defaultLocation         = "europe-west1"
+	defaultTemperature      = float32(0.0)
+	defaultTopP             = float32(0.95)
+	defaultMaxTokens        = int32(8192)
+	defaultResponseMimeType = "application/json"
+	defaultModel            = "gemini-2.0-flash-001"
+)
+
+// valueOrDefault returns the dereferenced value if ptr is non-nil, otherwise returns defaultVal.
+func valueOrDefault[T any](ptr *T, defaultVal T) T {
+	if ptr != nil {
+		return *ptr
+	}
+	return defaultVal
+}
+
+func getEnvOrDefault(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+func modelPath(projectID, location, model string) string {
+	return fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model)
+}
+
+var harmCategoryMap = map[string]aiplatformpb.HarmCategory{
+	"hate_speech":       aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH,
+	"dangerous_content": aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT,
+	"sexually_explicit": aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT,
+	"harassment":        aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT,
+}
+
+var safetyThresholdMap = map[string]aiplatformpb.SafetySetting_HarmBlockThreshold{
+	"BLOCK_NONE":             aiplatformpb.SafetySetting_BLOCK_NONE,
+	"BLOCK_ONLY_HIGH":        aiplatformpb.SafetySetting_BLOCK_ONLY_HIGH,
+	"BLOCK_MEDIUM_AND_ABOVE": aiplatformpb.SafetySetting_BLOCK_MEDIUM_AND_ABOVE,
+	"BLOCK_LOW_AND_ABOVE":    aiplatformpb.SafetySetting_BLOCK_LOW_AND_ABOVE,
+}
+
 type Config struct {
-	// Generation parameters
-	Temperature      *float32 `yaml:"temperature"`      // Pointer to distinguish unset vs 0
-	TopP             *float32 `yaml:"topP"`
-	MaxTokens        *int32   `yaml:"maxTokens"`
-	ResponseMimeType string   `yaml:"responseMimeType"` // "application/json" or "text/plain"
+	Temperature      *float32          `yaml:"temperature"`
+	TopP             *float32          `yaml:"topP"`
+	MaxTokens        *int32            `yaml:"maxTokens"`
+	ResponseMimeType string            `yaml:"responseMimeType"`
+	Model            string            `yaml:"model"`
+	SafetySettings   map[string]string `yaml:"safetySettings"`
+}
 
-	// Model selection
-	Model string `yaml:"model"` // e.g., "gemini-2.0-flash-001", "gemini-1.5-pro"
+func (c *Config) Validate() error {
+	if c.Model != "" {
+		if err := validateModel(c.Model); err != nil {
+			return fmt.Errorf("model: %w", err)
+		}
+	}
 
-	// Safety settings (optional)
-	SafetySettings map[string]string `yaml:"safetySettings"`
+	if len(c.SafetySettings) > 0 {
+		if _, err := buildSafetySettings(*c); err != nil {
+			return fmt.Errorf("safetySettings: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func parseFrontmatter(content []byte) (Config, string, error) {
 	const prefix = "---\n"
 	const delimiter = "\n---\n"
 
-	// Normalize line endings to handle both Unix (\n) and Windows (\r\n) files
 	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 
 	if !bytes.HasPrefix(content, []byte(prefix)) {
 		return Config{}, string(content), nil
 	}
 
-	// Split content by delimiter to separate frontmatter from markdown
 	parts := bytes.SplitN(content, []byte(delimiter), 2)
 	if len(parts) < 2 {
 		return Config{}, "", fmt.Errorf("invalid frontmatter: missing closing ---")
@@ -75,7 +127,6 @@ func blockNoSafetySettings() []*aiplatformpb.SafetySetting {
 }
 
 func validateModel(model string) error {
-	// List of supported models
 	supportedModels := []string{
 		"gemini-2.0-flash-001",
 		"gemini-1.5-pro-002",
@@ -84,53 +135,32 @@ func validateModel(model string) error {
 		"gemini-1.5-flash-001",
 	}
 
-	for _, supported := range supportedModels {
-		if model == supported {
-			return nil
-		}
+	if !slices.Contains(supportedModels, model) {
+		return fmt.Errorf("unsupported model: %s (supported: %v)", model, supportedModels)
 	}
-
-	return fmt.Errorf("unsupported model: %s (supported: %v)", model, supportedModels)
+	return nil
 }
 
 func parseHarmCategory(category string) (aiplatformpb.HarmCategory, error) {
-	switch category {
-	case "hate_speech":
-		return aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH, nil
-	case "dangerous_content":
-		return aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT, nil
-	case "sexually_explicit":
-		return aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT, nil
-	case "harassment":
-		return aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT, nil
-	default:
-		return 0, fmt.Errorf("unknown harm category: %s", category)
+	if v, ok := harmCategoryMap[category]; ok {
+		return v, nil
 	}
+	return 0, fmt.Errorf("unknown harm category: %s", category)
 }
 
 func parseSafetyThreshold(threshold string) (aiplatformpb.SafetySetting_HarmBlockThreshold, error) {
-	switch threshold {
-	case "BLOCK_NONE":
-		return aiplatformpb.SafetySetting_BLOCK_NONE, nil
-	case "BLOCK_ONLY_HIGH":
-		return aiplatformpb.SafetySetting_BLOCK_ONLY_HIGH, nil
-	case "BLOCK_MEDIUM_AND_ABOVE":
-		return aiplatformpb.SafetySetting_BLOCK_MEDIUM_AND_ABOVE, nil
-	case "BLOCK_LOW_AND_ABOVE":
-		return aiplatformpb.SafetySetting_BLOCK_LOW_AND_ABOVE, nil
-	default:
-		return 0, fmt.Errorf("unknown safety threshold: %s", threshold)
+	if v, ok := safetyThresholdMap[threshold]; ok {
+		return v, nil
 	}
+	return 0, fmt.Errorf("unknown safety threshold: %s", threshold)
 }
 
 func buildSafetySettings(config Config) ([]*aiplatformpb.SafetySetting, error) {
-	// Default: BLOCK_NONE for all categories
 	if len(config.SafetySettings) == 0 {
 		return blockNoSafetySettings(), nil
 	}
 
-	// Build custom settings
-	var settings []*aiplatformpb.SafetySetting
+	settings := make([]*aiplatformpb.SafetySetting, 0, len(config.SafetySettings))
 	for categoryStr, thresholdStr := range config.SafetySettings {
 		category, err := parseHarmCategory(categoryStr)
 		if err != nil {
@@ -153,22 +183,21 @@ func buildSafetySettings(config Config) ([]*aiplatformpb.SafetySetting, error) {
 
 func callVertexAI(ctx context.Context, config Config, prompt string) (string, error) {
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
-	if location == "" {
-		location = "europe-west1"
-	}
-
 	if projectID == "" {
 		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable not set")
 	}
+	location := getEnvOrDefault("GOOGLE_CLOUD_LOCATION", defaultLocation)
 
-	// Model selection with default
-	model := "gemini-2.0-flash-001"
+	model := defaultModel
 	if config.Model != "" {
 		if err := validateModel(config.Model); err != nil {
 			return "", err
 		}
 		model = config.Model
+	}
+
+	if err := config.Validate(); err != nil {
+		return "", err
 	}
 
 	client, err := aiplatform.NewPredictionClient(ctx)
@@ -177,35 +206,21 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 	}
 	defer client.Close()
 
-	// Apply config with defaults
-	temperature := float32(0.0)
-	if config.Temperature != nil {
-		temperature = *config.Temperature
-	}
-
-	topP := float32(0.95)
-	if config.TopP != nil {
-		topP = *config.TopP
-	}
-
-	maxTokens := int32(8192)
-	if config.MaxTokens != nil {
-		maxTokens = *config.MaxTokens
-	}
-
-	responseMimeType := "application/json"
+	temperature := valueOrDefault(config.Temperature, defaultTemperature)
+	topP := valueOrDefault(config.TopP, defaultTopP)
+	maxTokens := valueOrDefault(config.MaxTokens, defaultMaxTokens)
+	responseMimeType := defaultResponseMimeType
 	if config.ResponseMimeType != "" {
 		responseMimeType = config.ResponseMimeType
 	}
 
-	// Build safety settings
 	safetySettings, err := buildSafetySettings(config)
 	if err != nil {
 		return "", fmt.Errorf("invalid safety settings: %w", err)
 	}
 
 	req := &aiplatformpb.GenerateContentRequest{
-		Model: fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model),
+		Model: modelPath(projectID, location, model),
 		Contents: []*aiplatformpb.Content{
 			{
 				Role: "user",
@@ -219,17 +234,6 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 			TopP:             &topP,
 			MaxOutputTokens:  &maxTokens,
 			ResponseMimeType: responseMimeType,
-			//ResponseSchema: &aiplatformpb.Schema{
-			//	Type: aiplatformpb.Type_ARRAY,
-			//	Items: &aiplatformpb.Schema{
-			//		Type: aiplatformpb.Type_OBJECT,
-			//		Properties: map[string]*aiplatformpb.Schema{
-			//			"check_id": {Type: aiplatformpb.Type_STRING},
-			//			"feedback": {Type: aiplatformpb.Type_STRING},
-			//			"result":   {Type: aiplatformpb.Type_STRING},
-			//		},
-			//	},
-			//},
 		},
 		SafetySettings: safetySettings,
 	}
@@ -247,14 +251,12 @@ func callVertexAI(ctx context.Context, config Config, prompt string) (string, er
 		return "", fmt.Errorf("empty response from model")
 	}
 
-	// Find the first part with non-empty text
-	for _, part := range candidate.Content.Parts {
-		if text := part.GetText(); text != "" {
-			return text, nil
-		}
+	// Return the first non-empty text part (prefer first part)
+	text := candidate.Content.Parts[0].GetText()
+	if text == "" {
+		return "", fmt.Errorf("no text content in response")
 	}
-
-	return "", fmt.Errorf("no text content in response")
+	return text, nil
 }
 
 func main() {
@@ -274,6 +276,10 @@ func main() {
 	config, markdown, err := parseFrontmatter(content)
 	if err != nil {
 		fatalf("Error parsing template: %v", err)
+	}
+
+	if err := config.Validate(); err != nil {
+		fatalf("Invalid configuration: %v", err)
 	}
 
 	ctx := context.Background()
