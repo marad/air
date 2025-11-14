@@ -14,8 +14,8 @@ var PlaceholderPattern = regexp.MustCompile(`\{\{([a-zA-Z_][a-zA-Z0-9_]*?)(?:\|(
 
 // InclusionContext tracks processed files to detect circular includes
 type InclusionContext struct {
-	Visited map[string]bool
-	BaseDir string
+	Visited map[string]bool // Absolute paths of files currently being processed
+	BaseDir string          // Base directory for resolving relative includes
 }
 
 func NewInclusionContext(initialFile string) *InclusionContext {
@@ -30,6 +30,44 @@ func ResolveAbsolutePath(path, baseDir string) (string, error) {
 		path = filepath.Join(baseDir, path)
 	}
 	return filepath.Abs(path)
+}
+
+// validatePathSecurity ensures the include path doesn't escape the project directory
+func validatePathSecurity(absPath string) error {
+	projectRoot, err := filepath.Abs(".")
+	if err != nil {
+		return fmt.Errorf("getting project root: %w", err)
+	}
+	if !strings.HasPrefix(absPath, projectRoot) {
+		return fmt.Errorf("include path is outside the project directory")
+	}
+	return nil
+}
+
+// checkCircular verifies no circular dependency exists
+func (ctx *InclusionContext) checkCircular(absPath string) error {
+	if ctx.Visited[absPath] {
+		return fmt.Errorf("circular include detected: %s", absPath)
+	}
+	return nil
+}
+
+// processIncludeFile reads and recursively processes an included file
+func (ctx *InclusionContext) processIncludeFile(absPath string) (string, error) {
+	ctx.Visited[absPath] = true
+	defer delete(ctx.Visited, absPath) // Allow same file in different branches
+
+	includedContent, err := os.ReadFile(absPath)
+	if err != nil {
+		return "", fmt.Errorf("reading included file: %w", err)
+	}
+
+	// Process nested includes with updated baseDir
+	oldBaseDir := ctx.BaseDir
+	ctx.BaseDir = filepath.Dir(absPath)
+	defer func() { ctx.BaseDir = oldBaseDir }()
+
+	return ProcessIncludes(string(includedContent), ctx)
 }
 
 func ProcessIncludes(content string, ctx *InclusionContext) (string, error) {
@@ -52,53 +90,29 @@ func ProcessIncludes(content string, ctx *InclusionContext) (string, error) {
 
 		includePath := matches[1]
 
-		// Resolve path (relative to current file's directory)
+		// Resolve path relative to current file's directory
 		absPath, err := ResolveAbsolutePath(includePath, ctx.BaseDir)
 		if err != nil {
 			return "", fmt.Errorf("resolving include path %s: %w", includePath, err)
 		}
 
-		// Security check: prevent directory traversal outside the project directory
-		projectRoot, err := filepath.Abs(".")
-		if err != nil {
-			return "", fmt.Errorf("getting project root: %w", err)
-		}
-		if !strings.HasPrefix(absPath, projectRoot) {
-			return "", fmt.Errorf("include path %s is outside the project directory", includePath)
+		// Security check
+		if err := validatePathSecurity(absPath); err != nil {
+			return "", fmt.Errorf("%s: %w", includePath, err)
 		}
 
 		// Check for circular includes
-		if ctx.Visited[absPath] {
-			return "", fmt.Errorf("circular include detected: %s", includePath)
+		if err := ctx.checkCircular(absPath); err != nil {
+			return "", fmt.Errorf("%s: %w", includePath, err)
 		}
 
-		// Mark as visited
-		ctx.Visited[absPath] = true
-
-		// Read included file
-		includedContent, err := os.ReadFile(absPath)
-		if err != nil {
-			return "", fmt.Errorf("reading included file %s: %w", includePath, err)
-		}
-
-		// Recursively process includes in the included file
-		// Update baseDir for nested includes
-		oldBaseDir := ctx.BaseDir
-		ctx.BaseDir = filepath.Dir(absPath)
-
-		processedContent, err := ProcessIncludes(string(includedContent), ctx)
+		// Process included file
+		processedContent, err := ctx.processIncludeFile(absPath)
 		if err != nil {
 			return "", err
 		}
 
-		ctx.BaseDir = oldBaseDir
-
-		// Write processed content
 		result.WriteString(processedContent)
-
-		// Unmark for other branches (allows same file in different paths)
-		delete(ctx.Visited, absPath)
-
 		lastIndex = matchEnd
 	}
 
@@ -138,46 +152,46 @@ func ReplacePlaceholders(content string, variables map[string]string) (string, e
 func ParseVarFlags(args []string) (map[string]string, []string, error) {
 	vars := make(map[string]string)
 	remaining := []string{}
-	
+
 	i := 0
 	for i < len(args) {
 		arg := args[i]
-		
+
 		if arg == "--var" || arg == "-v" {
 			if i+1 >= len(args) {
 				return nil, nil, fmt.Errorf("--var requires an argument")
 			}
-			
+
 			i++
 			varDef := args[i]
-			
+
 			// Parse "key=value"
 			parts := strings.SplitN(varDef, "=", 2)
 			if len(parts) != 2 {
 				return nil, nil, fmt.Errorf("invalid --var format: %s (expected key=value)", varDef)
 			}
-			
+
 			vars[parts[0]] = parts[1]
 		} else {
 			remaining = append(remaining, arg)
 		}
-		
+
 		i++
 	}
-	
+
 	return vars, remaining, nil
 }
 
 func GetEnvVariables() map[string]string {
 	vars := make(map[string]string)
-	
+
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) == 2 {
 			vars[parts[0]] = parts[1]
 		}
 	}
-	
+
 	return vars
 }
 

@@ -121,11 +121,11 @@ func TestReplacePlaceholders(t *testing.T) {
 
 func TestParseVarFlags(t *testing.T) {
 	tests := []struct {
-		name        string
-		args        []string
-		wantVars    map[string]string
-		wantArgs    []string
-		wantErr     bool
+		name     string
+		args     []string
+		wantVars map[string]string
+		wantArgs []string
+		wantErr  bool
 	}{
 		{
 			name:     "no vars",

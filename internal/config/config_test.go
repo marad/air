@@ -8,11 +8,11 @@ import (
 
 func TestParseFrontmatter(t *testing.T) {
 	tests := []struct {
-		name        string
-		content     string
-		wantConfig  Config
-		wantBody    string
-		wantErr     bool
+		name       string
+		content    string
+		wantConfig Config
+		wantBody   string
+		wantErr    bool
 	}{
 		{
 			name: "valid frontmatter",

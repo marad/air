@@ -9,62 +9,32 @@ import (
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 	"consistency/internal/config"
 	"consistency/internal/schema"
+	"consistency/internal/util"
 )
-
-func ValueOrDefault[T any](ptr *T, defaultVal T) T {
-	if ptr != nil {
-		return *ptr
-	}
-	return defaultVal
-}
-
-func GetEnvOrDefault(key, defaultVal string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return defaultVal
-}
 
 func ModelPath(projectID, location, model string) string {
 	return fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model)
 }
 
-func CallVertexAI(ctx context.Context, cfg config.Config, prompt string) (string, error) {
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+func loadEnvironment() (projectID, location string, err error) {
+	projectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
 	if projectID == "" {
-		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable not set")
+		return "", "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable not set")
 	}
-	location := GetEnvOrDefault("GOOGLE_CLOUD_LOCATION", config.DefaultLocation)
+	location = util.GetEnvOrDefault("GOOGLE_CLOUD_LOCATION", config.DefaultLocation)
+	return projectID, location, nil
+}
 
-	model := config.DefaultModel
-	if cfg.Model != "" {
-		if err := config.ValidateModel(cfg.Model); err != nil {
-			return "", err
-		}
-		model = cfg.Model
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return "", err
-	}
-
-	client, err := aiplatform.NewPredictionClient(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to create client: %w", err)
-	}
-	defer client.Close()
-
-	temperature := ValueOrDefault(cfg.Temperature, config.DefaultTemperature)
-	topP := ValueOrDefault(cfg.TopP, config.DefaultTopP)
-	maxTokens := ValueOrDefault(cfg.MaxTokens, config.DefaultMaxTokens)
-	responseMimeType := config.DefaultResponseMimeType
-	if cfg.ResponseMimeType != "" {
-		responseMimeType = cfg.ResponseMimeType
-	}
+func buildRequest(cfg config.Config, prompt, projectID, location string) (*aiplatformpb.GenerateContentRequest, error) {
+	temperature := cfg.TemperatureOrDefault()
+	topP := cfg.TopPOrDefault()
+	maxTokens := cfg.MaxTokensOrDefault()
+	responseMimeType := cfg.ResponseMimeTypeOrDefault()
+	model := cfg.ModelOrDefault()
 
 	safetySettings, err := config.BuildSafetySettings(cfg)
 	if err != nil {
-		return "", fmt.Errorf("invalid safety settings: %w", err)
+		return nil, fmt.Errorf("invalid safety settings: %w", err)
 	}
 
 	req := &aiplatformpb.GenerateContentRequest{
@@ -90,26 +60,54 @@ func CallVertexAI(ctx context.Context, cfg config.Config, prompt string) (string
 		req.GenerationConfig.ResponseSchema = schema.ConvertSchemaToProtobuf(cfg.ResponseSchema)
 	}
 
-	resp, err := client.GenerateContent(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate content: %w", err)
+	return req, nil
+}
+
+func extractText(resp *aiplatformpb.GenerateContentResponse) (string, error) {
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("no response candidates")
 	}
 
-	if len(resp.Candidates) == 0 {
-		return "", fmt.Errorf("no response candidates from model")
-	}
 	candidate := resp.Candidates[0]
 	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response from model")
+		return "", fmt.Errorf("empty response content")
 	}
 
-	// Return the first non-empty text part (prefer first part)
-	text := candidate.Content.Parts[0].GetText()
-	if text == "" {
-		return "", fmt.Errorf("no text content in response")
+	if text := candidate.Content.Parts[0].GetText(); text != "" {
+		return text, nil
 	}
 
-	// Validate response against schema if provided
+	return "", fmt.Errorf("no text in response")
+}
+
+func CallVertexAI(ctx context.Context, cfg config.Config, prompt string) (string, error) {
+	projectID, location, err := loadEnvironment()
+	if err != nil {
+		return "", err
+	}
+
+	client, err := aiplatform.NewPredictionClient(ctx)
+	if err != nil {
+		return "", fmt.Errorf("creating AI client: %w", err)
+	}
+	defer client.Close()
+
+	req, err := buildRequest(cfg, prompt, projectID, location)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.GenerateContent(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("generating content: %w", err)
+	}
+
+	text, err := extractText(resp)
+	if err != nil {
+		return "", err
+	}
+
+	// Validate response against schema if provided (just warn, don't fail)
 	if cfg.ResponseSchema != nil {
 		if err := schema.ValidateResponse(text, cfg.ResponseSchema); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: response does not match schema: %v\n", err)

@@ -36,14 +36,14 @@ var SafetyThresholdMap = map[string]aiplatform.SafetySetting_HarmBlockThreshold{
 }
 
 type Config struct {
-	Temperature      *float32                `yaml:"temperature"`
-	TopP             *float32                `yaml:"topP"`
-	MaxTokens        *int32                  `yaml:"maxTokens"`
-	ResponseMimeType string                  `yaml:"responseMimeType"`
-	Model            string                  `yaml:"model"`
-	SafetySettings   map[string]string       `yaml:"safetySettings"`
-	Variables        map[string]string       `yaml:"variables"`
-	ResponseSchema   map[string]interface{}  `yaml:"responseSchema"`
+	Temperature      *float32               `yaml:"temperature"`
+	TopP             *float32               `yaml:"topP"`
+	MaxTokens        *int32                 `yaml:"maxTokens"`
+	ResponseMimeType string                 `yaml:"responseMimeType"`
+	Model            string                 `yaml:"model"`
+	SafetySettings   map[string]string      `yaml:"safetySettings"`
+	Variables        map[string]string      `yaml:"variables"`
+	ResponseSchema   map[string]interface{} `yaml:"responseSchema"`
 }
 
 func (c *Config) Validate() error {
@@ -53,13 +53,53 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if len(c.SafetySettings) > 0 {
-		if _, err := BuildSafetySettings(*c); err != nil {
+	// Validate safety settings without building (BuildSafetySettings will be called later)
+	for cat, thresh := range c.SafetySettings {
+		if _, err := ParseHarmCategory(cat); err != nil {
+			return fmt.Errorf("safetySettings: %w", err)
+		}
+		if _, err := ParseSafetyThreshold(thresh); err != nil {
 			return fmt.Errorf("safetySettings: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// Helper methods for parameter defaults
+func (c *Config) TemperatureOrDefault() float32 {
+	if c.Temperature != nil {
+		return *c.Temperature
+	}
+	return DefaultTemperature
+}
+
+func (c *Config) TopPOrDefault() float32 {
+	if c.TopP != nil {
+		return *c.TopP
+	}
+	return DefaultTopP
+}
+
+func (c *Config) MaxTokensOrDefault() int32 {
+	if c.MaxTokens != nil {
+		return *c.MaxTokens
+	}
+	return DefaultMaxTokens
+}
+
+func (c *Config) ResponseMimeTypeOrDefault() string {
+	if c.ResponseMimeType != "" {
+		return c.ResponseMimeType
+	}
+	return DefaultResponseMimeType
+}
+
+func (c *Config) ModelOrDefault() string {
+	if c.Model != "" {
+		return c.Model
+	}
+	return DefaultModel
 }
 
 func (c *Config) ValidateSchema() error {
@@ -82,36 +122,31 @@ func (c *Config) ValidateSchema() error {
 	return nil
 }
 
-// ParseFrontmatter extracts YAML configuration and markdown content from a template file.
-// It looks for frontmatter delimited by --- and parses the YAML into a Config struct.
-// Returns the config, remaining markdown content, and any parsing error.
+// ParseFrontmatter extracts YAML frontmatter from markdown content delimited by ---.
 func ParseFrontmatter(content []byte) (Config, string, error) {
-	const prefix = "---\n"
-	const delimiter = "\n---\n"
-
 	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 
-	if !bytes.HasPrefix(content, []byte(prefix)) {
+	if !bytes.HasPrefix(content, []byte("---\n")) {
 		return Config{}, string(content), nil
 	}
 
-	parts := bytes.SplitN(content, []byte(delimiter), 2)
-	if len(parts) < 2 {
+	// Remove leading "---\n"
+	content = content[4:]
+
+	// Find closing "---"
+	yamlContent, markdown, found := bytes.Cut(content, []byte("\n---\n"))
+	if !found {
 		return Config{}, "", fmt.Errorf("invalid frontmatter: missing closing ---")
 	}
 
 	var config Config
-	if len(parts[0]) >= len(prefix) {
-		yamlContent := parts[0][len(prefix):]
-		if len(yamlContent) > 0 {
-			if err := yaml.Unmarshal(yamlContent, &config); err != nil {
-				return Config{}, "", fmt.Errorf("failed to parse YAML: %w", err)
-			}
+	if len(yamlContent) > 0 {
+		if err := yaml.Unmarshal(yamlContent, &config); err != nil {
+			return Config{}, "", fmt.Errorf("failed to parse YAML: %w", err)
 		}
 	}
 
-	markdown := string(parts[1])
-	return config, strings.TrimSpace(markdown), nil
+	return config, strings.TrimSpace(string(markdown)), nil
 }
 
 // ValidateModel checks if the given model name is supported by the AI service.

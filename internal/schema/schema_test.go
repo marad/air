@@ -36,7 +36,7 @@ func TestConvertSchemaToProtobuf(t *testing.T) {
 		{
 			name: "array with items",
 			schema: map[string]interface{}{
-				"type": "array",
+				"type":  "array",
 				"items": map[string]interface{}{"type": "string"},
 			},
 			check: func(s *aiplatform.Schema) bool {
@@ -88,11 +88,7 @@ func TestFormatResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			formatted, err := FormatResponse(tt.response)
-			if err != nil {
-				t.Errorf("FormatResponse() error = %v", err)
-				return
-			}
+			formatted := FormatResponse(tt.response)
 			if tt.wantJSON && formatted == tt.response {
 				t.Errorf("FormatResponse() should have formatted JSON")
 			}
@@ -102,10 +98,10 @@ func TestFormatResponse(t *testing.T) {
 
 func TestValidateResponse(t *testing.T) {
 	tests := []struct {
-		name      string
-		response  string
-		schema    map[string]interface{}
-		wantErr   bool
+		name     string
+		response string
+		schema   map[string]interface{}
+		wantErr  bool
 	}{
 		{
 			name:     "valid response",

@@ -60,16 +60,15 @@ func ConvertSchemaToProtobuf(schema map[string]interface{}) *aiplatform.Schema {
 	return pbSchema
 }
 
-func FormatResponse(response string) (string, error) {
+func FormatResponse(response string) string {
 	var jsonData interface{}
 	if err := json.Unmarshal([]byte(response), &jsonData); err != nil {
-		return response, nil // If not JSON, return as is
+		return response // If not JSON, return as is
 	}
-	formatted, err := json.MarshalIndent(jsonData, "", "  ")
-	if err != nil {
-		return response, nil
+	if formatted, err := json.MarshalIndent(jsonData, "", "  "); err == nil {
+		return string(formatted)
 	}
-	return string(formatted), nil
+	return response
 }
 
 func ValidateResponse(response string, schema map[string]interface{}) error {
