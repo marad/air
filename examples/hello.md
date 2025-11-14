@@ -1,5 +1,6 @@
 ---
-# Config section (empty for now, will use in M2)
+temperature: 0.5
+responseMimeType: text/plain
 ---
 
 Write a short greeting in Polish.
