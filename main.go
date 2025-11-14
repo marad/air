@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -14,54 +15,60 @@ import (
 )
 
 type Config struct {
-	// Fields will expand in Milestone 2
-	// For now, just parse and ignore
+	// Generation parameters
+	Temperature      *float32 `yaml:"temperature"`      // Pointer to distinguish unset vs 0
+	TopP             *float32 `yaml:"topP"`
+	MaxTokens        *int32   `yaml:"maxTokens"`
+	ResponseMimeType string   `yaml:"responseMimeType"` // "application/json" or "text/plain"
 }
 
 func parseFrontmatter(content []byte) (Config, string, error) {
-	// Split by "---" delimiters
-	// First "---" starts frontmatter
-	// Second "---" ends frontmatter
-	// Everything after is markdown content
+	const prefix = "---\n"
+	const delimiter = "\n---\n"
+
+	// Normalize line endings to handle both Unix (\n) and Windows (\r\n) files
+	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
+
+	if !bytes.HasPrefix(content, []byte(prefix)) {
+		return Config{}, string(content), nil
+	}
+
+	// Split content by delimiter to separate frontmatter from markdown
+	parts := bytes.SplitN(content, []byte(delimiter), 2)
+	if len(parts) < 2 {
+		return Config{}, "", fmt.Errorf("invalid frontmatter: missing closing ---")
+	}
 
 	var config Config
-	lines := string(content)
-
-	// Check if file starts with "---"
-	if !strings.HasPrefix(lines, "---\n") {
-		// No frontmatter, entire content is markdown
-		return config, lines, nil
+	if err := yaml.Unmarshal(parts[0][len(prefix):], &config); err != nil {
+		return Config{}, "", fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
-	// Find second "---"
-	parts := strings.SplitN(lines[4:], "\n---\n", 2)
-	if len(parts) < 2 {
-		return config, "", fmt.Errorf("invalid frontmatter: missing closing ---")
-	}
-
-	// Parse YAML
-	err := yaml.Unmarshal([]byte(parts[0]), &config)
-	if err != nil {
-		return config, "", fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	// Return config and markdown content
-	return config, strings.TrimSpace(parts[1]), nil
+	markdown := string(parts[1])
+	return config, strings.TrimSpace(markdown), nil
 }
 
 func loadEnv() {
-	// Try to load .env from current directory
-	err := godotenv.Load()
-	if err != nil {
-		// Don't fail if .env doesn't exist, just log
-		// This is graceful - env vars might already be set
-		if !os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "Warning: error loading .env file: %v\n", err)
-		}
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "warning: loading .env: %v\n", err)
 	}
 }
 
-func callVertexAI(ctx context.Context, prompt string) (string, error) {
+func fatalf(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
+}
+
+func blockNoSafetySettings() []*aiplatformpb.SafetySetting {
+	return []*aiplatformpb.SafetySetting{
+		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
+		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
+		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
+		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
+	}
+}
+
+func callVertexAI(ctx context.Context, config Config, prompt string) (string, error) {
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
 	location := os.Getenv("GOOGLE_CLOUD_LOCATION")
 	if location == "" {
@@ -78,17 +85,29 @@ func callVertexAI(ctx context.Context, prompt string) (string, error) {
 	}
 	defer client.Close()
 
+	// Apply config with defaults
 	temperature := float32(0.0)
+	if config.Temperature != nil {
+		temperature = *config.Temperature
+	}
+
 	topP := float32(0.95)
+	if config.TopP != nil {
+		topP = *config.TopP
+	}
+
 	maxTokens := int32(8192)
+	if config.MaxTokens != nil {
+		maxTokens = *config.MaxTokens
+	}
+
+	responseMimeType := "application/json"
+	if config.ResponseMimeType != "" {
+		responseMimeType = config.ResponseMimeType
+	}
 
 	// Safety settings
-	safetySettings := []*aiplatformpb.SafetySetting{
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HATE_SPEECH, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_DANGEROUS_CONTENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_SEXUALLY_EXPLICIT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-		{Category: aiplatformpb.HarmCategory_HARM_CATEGORY_HARASSMENT, Threshold: aiplatformpb.SafetySetting_BLOCK_NONE},
-	}
+	safetySettings := blockNoSafetySettings()
 
 	req := &aiplatformpb.GenerateContentRequest{
 		Model: fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/gemini-2.0-flash-001", projectID, location),
@@ -104,7 +123,7 @@ func callVertexAI(ctx context.Context, prompt string) (string, error) {
 			Temperature:      &temperature,
 			TopP:             &topP,
 			MaxOutputTokens:  &maxTokens,
-			ResponseMimeType: "application/json",
+			ResponseMimeType: responseMimeType,
 			//ResponseSchema: &aiplatformpb.Schema{
 			//	Type: aiplatformpb.Type_ARRAY,
 			//	Items: &aiplatformpb.Schema{
@@ -125,46 +144,47 @@ func callVertexAI(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
 
-	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no response from model")
+	if len(resp.Candidates) == 0 {
+		return "", fmt.Errorf("no response candidates from model")
+	}
+	candidate := resp.Candidates[0]
+	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
+		return "", fmt.Errorf("empty response from model")
 	}
 
-	return resp.Candidates[0].Content.Parts[0].GetText(), nil
+	// Find the first part with non-empty text
+	for _, part := range candidate.Content.Parts {
+		if text := part.GetText(); text != "" {
+			return text, nil
+		}
+	}
+
+	return "", fmt.Errorf("no text content in response")
 }
 
 func main() {
-	// Load .env FIRST, before anything else
 	loadEnv()
 
-	// Add argument validation
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <template_file>\n", os.Args[0])
-		os.Exit(1)
+		fatalf("Usage: %s <template_file>", os.Args[0])
 	}
 
 	templateFile := os.Args[1]
 
-	// Read file contents
 	content, err := os.ReadFile(templateFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading file %s: %v\n", templateFile, err)
-		os.Exit(1)
+		fatalf("Error reading file %s: %v", templateFile, err)
 	}
 
-	// Parse frontmatter
 	config, markdown, err := parseFrontmatter(content)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing template: %v\n", err)
-		os.Exit(1)
+		fatalf("Error parsing template: %v", err)
 	}
-	_ = config // Will use in Milestone 2
 
-	// Call AI with markdown content
 	ctx := context.Background()
-	result, err := callVertexAI(ctx, markdown)
+	result, err := callVertexAI(ctx, config, markdown)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error calling AI: %v\n", err)
-		os.Exit(1)
+		fatalf("Error calling AI: %v", err)
 	}
 
 	fmt.Println(result)
