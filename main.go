@@ -135,6 +135,45 @@ func processIncludes(content string, ctx *inclusionContext) (string, error) {
 	return result, nil
 }
 
+var placeholderPattern = regexp.MustCompile(`\{\{([a-zA-Z_][a-zA-Z0-9_]*?)(?:\|([^}]*))?\}\}`)
+
+func replacePlaceholders(content string, variables map[string]string) (string, error) {
+	var missing []string
+	
+	result := placeholderPattern.ReplaceAllStringFunc(content, func(match string) string {
+		submatches := placeholderPattern.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		
+		varName := submatches[1]
+		defaultValue := ""
+		if len(submatches) >= 3 {
+			defaultValue = submatches[2]
+		}
+		
+		// Try to resolve variable
+		if value, ok := variables[varName]; ok {
+			return value
+		}
+		
+		// Use default if provided
+		if defaultValue != "" {
+			return defaultValue
+		}
+		
+		// No value and no default - track as missing
+		missing = append(missing, varName)
+		return match // Keep placeholder as-is for error reporting
+	})
+	
+	if len(missing) > 0 {
+		return "", fmt.Errorf("undefined variables without defaults: %v", missing)
+	}
+	
+	return result, nil
+}
+
 type Config struct {
 	Temperature      *float32          `yaml:"temperature"`
 	TopP             *float32          `yaml:"topP"`
@@ -142,6 +181,7 @@ type Config struct {
 	ResponseMimeType string            `yaml:"responseMimeType"`
 	Model            string            `yaml:"model"`
 	SafetySettings   map[string]string `yaml:"safetySettings"`
+	Variables        map[string]string `yaml:"variables"`
 }
 
 func (c *Config) Validate() error {
@@ -367,8 +407,20 @@ func main() {
 		fatalf("Invalid configuration: %v", err)
 	}
 
+	// For now, use only frontmatter variables for placeholder replacement
+	variables := config.Variables
+	if variables == nil {
+		variables = make(map[string]string)
+	}
+
+	// Replace placeholders
+	finalMarkdown, err := replacePlaceholders(markdown, variables)
+	if err != nil {
+		fatalf("Error replacing placeholders: %v", err)
+	}
+
 	ctxAI := context.Background()
-	result, err := callVertexAI(ctxAI, config, markdown)
+	result, err := callVertexAI(ctxAI, config, finalMarkdown)
 	if err != nil {
 		fatalf("Error calling AI: %v", err)
 	}
