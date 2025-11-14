@@ -9,6 +9,7 @@ import (
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1"
 	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
+	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -46,6 +47,18 @@ func parseFrontmatter(content []byte) (Config, string, error) {
 
 	// Return config and markdown content
 	return config, strings.TrimSpace(parts[1]), nil
+}
+
+func loadEnv() {
+	// Try to load .env from current directory
+	err := godotenv.Load()
+	if err != nil {
+		// Don't fail if .env doesn't exist, just log
+		// This is graceful - env vars might already be set
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: error loading .env file: %v\n", err)
+		}
+	}
 }
 
 func callVertexAI(ctx context.Context, prompt string) (string, error) {
@@ -120,6 +133,9 @@ func callVertexAI(ctx context.Context, prompt string) (string, error) {
 }
 
 func main() {
+	// Load .env FIRST, before anything else
+	loadEnv()
+
 	// Add argument validation
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <template_file>\n", os.Args[0])
