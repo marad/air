@@ -23,6 +23,57 @@ It allows:
 - including other files
 - replacing named placeholders with concrete values
 
+## Templating Features
+
+### File Inclusion
+
+Include external files in your templates:
+
+```markdown
+{{include "fragments/header.md"}}
+Main content here
+{{include "fragments/footer.md"}}
+```
+
+Includes support:
+- Relative paths (resolved from current file's directory)
+- Absolute paths
+- Nested includes (includes can contain includes)
+- Circular dependency detection
+
+### Variables and Placeholders
+
+Use placeholders with default values:
+
+```markdown
+Hello {{name|User}}!
+Your task: {{task}}
+```
+
+Variables can be provided via:
+
+1. **CLI flags** (highest priority):
+   ```bash
+   ./air template.md --var name=Alice --var task=coding
+   ```
+
+2. **YAML frontmatter**:
+   ```yaml
+   ---
+   variables:
+     name: Bob
+     task: writing
+   ---
+   ```
+
+3. **Environment variables** (lowest priority):
+   ```bash
+   export NAME=Charlie
+   ./air template.md
+   ```
+
+Default values: Use `{{variable|default_value}}` syntax.
+
 ## Configuration
 
 While prompt is a simple markdown file, you can add YAML frontmatter in the beginning to modify how
