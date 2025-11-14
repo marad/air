@@ -145,7 +145,7 @@ This document outlines the step-by-step implementation plan for AIR (AI Requeste
 ## Current Status
 
 - [x] PoC implementation (basic Vertex AI call)
-- [ ] Milestone 1 - In Progress
+- [x] Milestone 1 - Completed
 - [ ] Milestone 2 - Not Started
 - [ ] Milestone 3 - Not Started
 - [ ] Milestone 4 - Not Started
