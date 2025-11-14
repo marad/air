@@ -82,12 +82,31 @@ func callVertexAI(ctx context.Context, prompt string) (string, error) {
 }
 
 func main() {
+	// Add argument validation
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: %s <template_file>\n", os.Args[0])
+		os.Exit(1)
+	}
+
+	templateFile := os.Args[1]
+
+	// Read file contents
+	content, err := os.ReadFile(templateFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file %s: %v\n", templateFile, err)
+		os.Exit(1)
+	}
+
+	// TODO: Parse frontmatter and content
+	_ = content // Placeholder until we implement parsing
+
 	ctx := context.Background()
 
-	result, err := callVertexAI(ctx, "Hello World")
+	result, err := callVertexAI(ctx, "Hello World") // Still hardcoded for now
 
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "Error calling AI: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Println(result)
