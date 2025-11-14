@@ -41,6 +41,14 @@ func getEnvOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
+// resolveAbsolutePath resolves a path to absolute, relative to baseDir if not already absolute
+func resolveAbsolutePath(path, baseDir string) (string, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	return filepath.Abs(path)
+}
+
 func modelPath(projectID, location, model string) string {
 	return fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model)
 }
@@ -75,102 +83,107 @@ func newInclusionContext(initialFile string) *inclusionContext {
 var includePattern = regexp.MustCompile(`\{\{include\s+"([^"]+)"\}\}`)
 
 func processIncludes(content string, ctx *inclusionContext) (string, error) {
-	result := content
-	
+	var result strings.Builder
+	lastIndex := 0
+
 	for {
-		matches := includePattern.FindStringSubmatch(result)
+		matches := includePattern.FindStringSubmatch(content[lastIndex:])
 		if matches == nil {
-			// No more includes found
+			result.WriteString(content[lastIndex:])
 			break
 		}
-		
+
+		// Calculate absolute position
+		matchStart := lastIndex + strings.Index(content[lastIndex:], matches[0])
+		matchEnd := matchStart + len(matches[0])
+
+		// Write content before match
+		result.WriteString(content[lastIndex:matchStart])
+
 		includePath := matches[1]
-		fullMatch := matches[0]
-		
+
 		// Resolve path (relative to current file's directory)
-		resolvedPath := includePath
-		if !filepath.IsAbs(includePath) {
-			resolvedPath = filepath.Join(ctx.baseDir, includePath)
-		}
-		
-		// Normalize path for circular detection
-		absPath, err := filepath.Abs(resolvedPath)
+		absPath, err := resolveAbsolutePath(includePath, ctx.baseDir)
 		if err != nil {
 			return "", fmt.Errorf("resolving include path %s: %w", includePath, err)
 		}
-		
+
+		// Security check: prevent directory traversal outside the project directory
+		projectRoot, err := filepath.Abs(".")
+		if err != nil {
+			return "", fmt.Errorf("getting project root: %w", err)
+		}
+		if !strings.HasPrefix(absPath, projectRoot) {
+			return "", fmt.Errorf("include path %s is outside the project directory", includePath)
+		}
+
 		// Check for circular includes
 		if ctx.visited[absPath] {
 			return "", fmt.Errorf("circular include detected: %s", includePath)
 		}
-		
+
 		// Mark as visited
 		ctx.visited[absPath] = true
-		
+
 		// Read included file
 		includedContent, err := os.ReadFile(absPath)
 		if err != nil {
 			return "", fmt.Errorf("reading included file %s: %w", includePath, err)
 		}
-		
+
 		// Recursively process includes in the included file
 		// Update baseDir for nested includes
 		oldBaseDir := ctx.baseDir
 		ctx.baseDir = filepath.Dir(absPath)
-		
+
 		processedContent, err := processIncludes(string(includedContent), ctx)
 		if err != nil {
 			return "", err
 		}
-		
+
 		ctx.baseDir = oldBaseDir
-		
-		// Replace the include directive with processed content
-		result = strings.Replace(result, fullMatch, processedContent, 1)
-		
+
+		// Write processed content
+		result.WriteString(processedContent)
+
 		// Unmark for other branches (allows same file in different paths)
 		delete(ctx.visited, absPath)
+
+		lastIndex = matchEnd
 	}
-	
-	return result, nil
+
+	return result.String(), nil
 }
 
 var placeholderPattern = regexp.MustCompile(`\{\{([a-zA-Z_][a-zA-Z0-9_]*?)(?:\|([^}]*))?\}\}`)
 
 func replacePlaceholders(content string, variables map[string]string) (string, error) {
 	var missing []string
-	
+
 	result := placeholderPattern.ReplaceAllStringFunc(content, func(match string) string {
 		submatches := placeholderPattern.FindStringSubmatch(match)
 		if len(submatches) < 2 {
 			return match
 		}
-		
+
 		varName := submatches[1]
-		defaultValue := ""
-		if len(submatches) >= 3 {
-			defaultValue = submatches[2]
-		}
-		
-		// Try to resolve variable
 		if value, ok := variables[varName]; ok {
 			return value
 		}
-		
-		// Use default if provided
-		if defaultValue != "" {
-			return defaultValue
+
+		if len(submatches) >= 3 && submatches[2] != "" {
+			return submatches[2] // Default value
 		}
-		
+
 		// No value and no default - track as missing
 		missing = append(missing, varName)
-		return match // Keep placeholder as-is for error reporting
+		return match
 	})
-	
+
 	if len(missing) > 0 {
 		return "", fmt.Errorf("undefined variables without defaults: %v", missing)
 	}
-	
+
 	return result, nil
 }
 
@@ -210,11 +223,9 @@ func parseVarFlags(args []string) (map[string]string, []string, error) {
 func getEnvVariables() map[string]string {
 	vars := make(map[string]string)
 	
-	// Get all environment variables
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) == 2 {
-			// Store with original case for now
 			vars[parts[0]] = parts[1]
 		}
 	}
@@ -222,25 +233,13 @@ func getEnvVariables() map[string]string {
 	return vars
 }
 
-func mergeVariables(cliVars, frontmatterVars, envVars map[string]string) map[string]string {
-	// Priority: CLI > frontmatter > env
+func mergeVariables(sources ...map[string]string) map[string]string {
 	result := make(map[string]string)
-	
-	// Start with env vars (lowest priority)
-	for k, v := range envVars {
-		result[k] = v
+	for _, src := range sources {
+		for k, v := range src {
+			result[k] = v
+		}
 	}
-	
-	// Override with frontmatter vars
-	for k, v := range frontmatterVars {
-		result[k] = v
-	}
-	
-	// Override with CLI vars (highest priority)
-	for k, v := range cliVars {
-		result[k] = v
-	}
-	
 	return result
 }
 
@@ -490,7 +489,7 @@ func main() {
 	
 	// Merge variables (CLI > frontmatter > env)
 	envVars := getEnvVariables()
-	variables := mergeVariables(cliVars, config.Variables, envVars)
+	variables := mergeVariables(envVars, config.Variables, cliVars)
 	
 	// Replace placeholders
 	finalMarkdown, err := replacePlaceholders(markdown, variables)
