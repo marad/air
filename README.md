@@ -97,7 +97,7 @@ responseMimeType: application/json
 - `temperature` (float32, 0.0-2.0): Controls randomness (0.0 = deterministic, higher = more creative)
 - `topP` (float32, 0.0-1.0): Nucleus sampling parameter
 - `maxTokens` (int32): Maximum response length
-- `model` (string): AI model to use. Supported: `gemini-2.0-flash-001`, `gemini-1.5-pro-002`, `gemini-1.5-pro-001`, `gemini-1.5-flash-002`, `gemini-1.5-flash-001`
+- `model` (string): AI model to use. [Supported models](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/model-versions)
 - `responseMimeType` (string): Response format, usually `application/json` or `text/plain`
 
 **Safety Settings:**
