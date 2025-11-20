@@ -64,7 +64,6 @@ func TestFormat(t *testing.T) {
 
 	formatted := summary.Format()
 
-	// Check that all expected components are present
 	if !strings.Contains(formatted, "Request Summary") {
 		t.Error("Format() should contain 'Request Summary'")
 	}

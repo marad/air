@@ -32,7 +32,6 @@ func TestResolveAbsolutePath(t *testing.T) {
 }
 
 func TestProcessIncludes(t *testing.T) {
-	// Create temporary files for testing in current dir to avoid outside project check
 	tempDir, err := os.MkdirTemp(".", "test_includes")
 	if err != nil {
 		t.Fatal(err)

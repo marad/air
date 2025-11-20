@@ -33,7 +33,6 @@ func TestValueOrDefault(t *testing.T) {
 }
 
 func TestGetEnvOrDefault(t *testing.T) {
-	// Save original env
 	original := os.Getenv("TEST_VAR")
 	defer os.Setenv("TEST_VAR", original)
 
