@@ -1,6 +1,38 @@
 # Configuration Reference
 
-This document describes all configuration options available in AIR prompt templates via YAML frontmatter.
+This document describes all configuration options available in AIR prompt templates via YAML frontmatter and command-line flags.
+
+## Command-Line Flags
+
+AIR supports several command-line flags to control its behavior:
+
+### --var, -v (key=value)
+Set template variables from the command line.
+
+```bash
+./air template.md --var name=Alice --var task=coding
+```
+
+CLI variables have the highest priority and override variables defined in YAML frontmatter or environment variables.
+
+### --output, -o (filename)
+Save the AI response to a file instead of printing to stdout.
+
+```bash
+./air template.md -o output.txt
+./air template.md --output response.json
+```
+
+The file will be created if it doesn't exist, or overwritten if it does.
+
+### --no-summary
+Hide the request summary that normally appears after each API call.
+
+```bash
+./air template.md --no-summary
+```
+
+By default, AIR displays a summary with token usage and estimated cost on stderr after each request.
 
 ## Variables
 

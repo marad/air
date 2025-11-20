@@ -160,15 +160,26 @@ func ReplacePlaceholders(content string, variables map[string]string) (string, e
 	return result, nil
 }
 
-func ParseVarFlags(args []string) (map[string]string, []string, error) {
-	vars := make(map[string]string)
+// CLIOptions represents parsed command-line options
+type CLIOptions struct {
+	Variables  map[string]string // --var flags
+	OutputFile string            // -o, --output
+	NoSummary  bool              // --no-summary
+}
+
+// ParseCLIFlags parses command-line flags and returns options and remaining arguments
+func ParseCLIFlags(args []string) (*CLIOptions, []string, error) {
+	opts := &CLIOptions{
+		Variables: make(map[string]string),
+	}
 	remaining := []string{}
 
 	i := 0
 	for i < len(args) {
 		arg := args[i]
 
-		if arg == "--var" || arg == "-v" {
+		switch arg {
+		case "--var", "-v":
 			if i+1 >= len(args) {
 				return nil, nil, fmt.Errorf("--var requires an argument")
 			}
@@ -182,15 +193,36 @@ func ParseVarFlags(args []string) (map[string]string, []string, error) {
 				return nil, nil, fmt.Errorf("invalid --var format: %s (expected key=value)", varDef)
 			}
 
-			vars[parts[0]] = parts[1]
-		} else {
+			opts.Variables[parts[0]] = parts[1]
+		case "-o", "--output":
+			if i+1 >= len(args) {
+				return nil, nil, fmt.Errorf("-o/--output requires a filename")
+			}
+
+			if opts.OutputFile != "" {
+				return nil, nil, fmt.Errorf("multiple output files specified")
+			}
+
+			i++
+			opts.OutputFile = args[i]
+		case "--no-summary":
+			opts.NoSummary = true
+		default:
 			remaining = append(remaining, arg)
 		}
 
 		i++
 	}
 
-	return vars, remaining, nil
+	return opts, remaining, nil
+}
+
+func ParseVarFlags(args []string) (map[string]string, []string, error) {
+	opts, remaining, err := ParseCLIFlags(args)
+	if err != nil {
+		return nil, nil, err
+	}
+	return opts.Variables, remaining, nil
 }
 
 func GetEnvVariables() map[string]string {

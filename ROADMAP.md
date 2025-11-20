@@ -149,7 +149,44 @@ This document outlines the step-by-step implementation plan for AIR (AI Requeste
 - [x] Milestone 2 - Completed
 - [x] Milestone 3 - Completed
 - [x] Milestone 4 - Completed
-- [ ] Milestone 5 - Not Started
+- [x] Milestone 5 - Completed
+
+### Milestone 5 Completion Details
+
+**Task 15: Refactor structure** ✅
+- Code split into packages: `internal/config/`, `internal/template/`, `internal/ai/`, `internal/schema/`, `internal/summary/`, `internal/util/`
+- Main logic extracted into testable `run()` function
+- Clean separation of concerns with dependency injection
+
+**Task 16: Error handling** ✅
+- Meaningful error messages with context using `fmt.Errorf("context: %w", err)`
+- Proper exit codes for different error types (InvalidArgs, FileError, ConfigError, TemplateError, AIError)
+- User-friendly error messages throughout the application
+
+**Task 17: Testing** ✅
+- Unit tests for all packages:
+  - `internal/config`: 75.0% coverage
+  - `internal/template`: 87.3% coverage
+  - `internal/schema`: 92.3% coverage
+  - `internal/summary`: 100.0% coverage
+  - `internal/util`: 100.0% coverage
+  - `internal/ai`: 28.8% coverage (mainly mock-dependent)
+  - `main.go`: 65.0% coverage (comprehensive error path testing)
+- Integration tests with example templates
+- All tests passing with `go test ./...`
+
+**Task 18: Documentation and examples** ✅
+- `examples/` directory with 13 sample templates covering:
+  - Basic usage, fragments, creative writing, deterministic analysis
+  - Content generation, email templates, safe content, structured outputs
+  - Reusable prompts, dynamic analysis, task workflows
+- Complete `docs/config-reference.md` documenting all YAML frontmatter options
+- Comprehensive README.md with:
+  - Installation and usage instructions
+  - Templating system (includes, placeholders, variables)
+  - Configuration options and examples
+  - Output file and summary features
+- Clear code comments throughout the codebase
 
 ---
 
