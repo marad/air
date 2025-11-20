@@ -132,7 +132,6 @@ func TestGetEnvOrDefault(t *testing.T) {
 	}
 }
 
-// Helper functions
 func intPtr(v int) *int {
 	return &v
 }

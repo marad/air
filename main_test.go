@@ -328,7 +328,6 @@ func TestExitError_Unwrap(t *testing.T) {
 	}
 }
 
-// createTestOptions creates a runOptions struct with sensible defaults for testing
 func createTestOptions() runOptions {
 	return runOptions{
 		args:   []string{},

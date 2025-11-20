@@ -93,7 +93,6 @@ func extractResponse(resp *aiplatformpb.GenerateContentResponse) (*Response, err
 		Text: text,
 	}
 
-	// Extract usage metadata if available
 	if resp.UsageMetadata != nil {
 		result.InputTokens = resp.UsageMetadata.PromptTokenCount
 		result.OutputTokens = resp.UsageMetadata.CandidatesTokenCount

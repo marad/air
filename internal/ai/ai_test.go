@@ -166,19 +166,8 @@ func TestExtractResponse(t *testing.T) {
 				t.Errorf("extractResponse() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !tt.wantErr {
-				if got.Text != tt.want.Text {
-					t.Errorf("extractResponse().Text = %v, want %v", got.Text, tt.want.Text)
-				}
-				if got.InputTokens != tt.want.InputTokens {
-					t.Errorf("extractResponse().InputTokens = %v, want %v", got.InputTokens, tt.want.InputTokens)
-				}
-				if got.OutputTokens != tt.want.OutputTokens {
-					t.Errorf("extractResponse().OutputTokens = %v, want %v", got.OutputTokens, tt.want.OutputTokens)
-				}
-				if got.TotalTokens != tt.want.TotalTokens {
-					t.Errorf("extractResponse().TotalTokens = %v, want %v", got.TotalTokens, tt.want.TotalTokens)
-				}
+			if !tt.wantErr && *got != *tt.want {
+				t.Errorf("extractResponse() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

@@ -6,17 +6,15 @@ import (
 	"io"
 )
 
-// RequestSummary contains information about a completed request
-type RequestSummary struct {
+type Summary struct {
 	Model        string
 	InputTokens  int32
 	OutputTokens int32
 	TotalTokens  int32
 }
 
-// BuildSummary creates a request summary from the model name and AI response
-func BuildSummary(model string, response *ai.Response) *RequestSummary {
-	return &RequestSummary{
+func BuildSummary(model string, response *ai.Response) *Summary {
+	return &Summary{
 		Model:        model,
 		InputTokens:  response.InputTokens,
 		OutputTokens: response.OutputTokens,
@@ -24,8 +22,7 @@ func BuildSummary(model string, response *ai.Response) *RequestSummary {
 	}
 }
 
-// Format returns a formatted string representation of the summary
-func (s *RequestSummary) Format() string {
+func (s *Summary) Format() string {
 	return fmt.Sprintf(`---
 Request Summary
 Model: %s
@@ -40,7 +37,6 @@ Total tokens: %d
 	)
 }
 
-// Display writes the formatted summary to the given writer (typically stderr)
-func Display(summary *RequestSummary, writer io.Writer) {
+func Display(summary *Summary, writer io.Writer) {
 	fmt.Fprintln(writer, summary.Format())
 }

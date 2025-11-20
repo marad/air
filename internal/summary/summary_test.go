@@ -55,7 +55,7 @@ func TestBuildSummary(t *testing.T) {
 }
 
 func TestFormat(t *testing.T) {
-	summary := &RequestSummary{
+	summary := &Summary{
 		Model:        "gemini-2.0-flash-001",
 		InputTokens:  1234,
 		OutputTokens: 567,
@@ -86,7 +86,7 @@ func TestFormat(t *testing.T) {
 }
 
 func TestDisplay(t *testing.T) {
-	summary := &RequestSummary{
+	summary := &Summary{
 		Model:        "gemini-2.0-flash-001",
 		InputTokens:  100,
 		OutputTokens: 50,

@@ -119,64 +119,6 @@ func TestReplacePlaceholders(t *testing.T) {
 	}
 }
 
-func TestParseVarFlags(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []string
-		wantVars map[string]string
-		wantArgs []string
-		wantErr  bool
-	}{
-		{
-			name:     "no vars",
-			args:     []string{"file.md"},
-			wantVars: map[string]string{},
-			wantArgs: []string{"file.md"},
-			wantErr:  false,
-		},
-		{
-			name:     "single var",
-			args:     []string{"--var", "key=value", "file.md"},
-			wantVars: map[string]string{"key": "value"},
-			wantArgs: []string{"file.md"},
-			wantErr:  false,
-		},
-		{
-			name:    "missing value",
-			args:    []string{"--var"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid format",
-			args:    []string{"--var", "invalid"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			vars, args, err := ParseVarFlags(tt.args)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseVarFlags() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr {
-				if len(vars) != len(tt.wantVars) {
-					t.Errorf("ParseVarFlags() vars len = %v, want %v", len(vars), len(tt.wantVars))
-				}
-				for k, v := range tt.wantVars {
-					if vars[k] != v {
-						t.Errorf("ParseVarFlags() vars[%s] = %v, want %v", k, vars[k], v)
-					}
-				}
-				if len(args) != len(tt.wantArgs) {
-					t.Errorf("ParseVarFlags() args = %v, want %v", args, tt.wantArgs)
-				}
-			}
-		})
-	}
-}
-
 func TestMergeVariables(t *testing.T) {
 	src1 := map[string]string{"a": "1", "b": "2"}
 	src2 := map[string]string{"b": "3", "c": "4"}
@@ -298,21 +240,5 @@ func TestParseCLIFlags(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestParseVarFlagsBackwardCompatibility(t *testing.T) {
-	// Test that ParseVarFlags still works as expected
-	args := []string{"--var", "key=value", "file.md"}
-	vars, remaining, err := ParseVarFlags(args)
-	if err != nil {
-		t.Errorf("ParseVarFlags() error = %v", err)
-		return
-	}
-	if vars["key"] != "value" {
-		t.Errorf("ParseVarFlags() vars[key] = %v, want value", vars["key"])
-	}
-	if len(remaining) != 1 || remaining[0] != "file.md" {
-		t.Errorf("ParseVarFlags() remaining = %v, want [file.md]", remaining)
 	}
 }

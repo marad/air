@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"air/internal/ai"
 	"air/internal/config"
@@ -15,6 +17,8 @@ import (
 )
 
 const (
+	DefaultFileMode = 0644
+
 	ExitSuccess       = 0
 	ExitInvalidArgs   = 2
 	ExitFileError     = 3
@@ -23,7 +27,6 @@ const (
 	ExitAIError       = 6
 )
 
-// runOptions contains dependencies that can be injected for testing
 type runOptions struct {
 	args            []string
 	stdout          io.Writer
@@ -46,7 +49,16 @@ func fatalf(exitCode int, format string, args ...any) {
 }
 
 func writeOutputToFile(filename, content string) error {
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if strings.Contains(filename, "..") {
+		return fmt.Errorf("invalid path: path traversal not allowed")
+	}
+
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+
+	file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, DefaultFileMode)
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
 	}
@@ -60,9 +72,7 @@ func writeOutputToFile(filename, content string) error {
 	return nil
 }
 
-// run executes the main application logic with injected dependencies
 func run(opts runOptions) error {
-	// Parse CLI flags
 	cliOpts, args, err := template.ParseCLIFlags(opts.args)
 	if err != nil {
 		return &exitError{code: ExitInvalidArgs, err: fmt.Errorf("parsing flags: %w", err)}
@@ -79,7 +89,6 @@ func run(opts runOptions) error {
 		return &exitError{code: ExitFileError, err: fmt.Errorf("reading file %s: %w", templateFile, err)}
 	}
 
-	// Process includes BEFORE parsing frontmatter
 	includeCtx := template.NewInclusionContext(templateFile)
 	contentWithIncludes, err := template.ProcessIncludes(string(content), includeCtx)
 	if err != nil {
@@ -95,11 +104,9 @@ func run(opts runOptions) error {
 		return &exitError{code: ExitConfigError, err: fmt.Errorf("invalid configuration: %w", err)}
 	}
 
-	// Merge variables (CLI > frontmatter > env)
 	envVars := opts.getEnvVariables()
 	variables := template.MergeVariables(envVars, cfg.Variables, cliOpts.Variables)
 
-	// Replace placeholders
 	finalMarkdown, err := template.ReplacePlaceholders(markdown, variables)
 	if err != nil {
 		return &exitError{code: ExitTemplateError, err: fmt.Errorf("replacing placeholders: %w", err)}
@@ -116,7 +123,6 @@ func run(opts runOptions) error {
 		output = schema.FormatResponse(response.Text)
 	}
 
-	// Write output to file or stdout
 	if cliOpts.OutputFile != "" {
 		err := opts.writeFile(cliOpts.OutputFile, output)
 		if err != nil {
@@ -126,7 +132,6 @@ func run(opts runOptions) error {
 		fmt.Fprintln(opts.stdout, output)
 	}
 
-	// Show summary if not disabled
 	if !cliOpts.NoSummary {
 		model := cfg.ModelOrDefault()
 		s := summary.BuildSummary(model, response)
@@ -136,7 +141,6 @@ func run(opts runOptions) error {
 	return nil
 }
 
-// exitError wraps an error with an exit code
 type exitError struct {
 	code int
 	err  error

@@ -160,14 +160,12 @@ func ReplacePlaceholders(content string, variables map[string]string) (string, e
 	return result, nil
 }
 
-// CLIOptions represents parsed command-line options
 type CLIOptions struct {
 	Variables  map[string]string // --var flags
 	OutputFile string            // -o, --output
 	NoSummary  bool              // --no-summary
 }
 
-// ParseCLIFlags parses command-line flags and returns options and remaining arguments
 func ParseCLIFlags(args []string) (*CLIOptions, []string, error) {
 	opts := &CLIOptions{
 		Variables: make(map[string]string),
@@ -215,14 +213,6 @@ func ParseCLIFlags(args []string) (*CLIOptions, []string, error) {
 	}
 
 	return opts, remaining, nil
-}
-
-func ParseVarFlags(args []string) (map[string]string, []string, error) {
-	opts, remaining, err := ParseCLIFlags(args)
-	if err != nil {
-		return nil, nil, err
-	}
-	return opts.Variables, remaining, nil
 }
 
 func GetEnvVariables() map[string]string {
