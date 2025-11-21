@@ -4,6 +4,8 @@ import (
 	"air/internal/util"
 	"os"
 	"testing"
+
+	"cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
 )
 
 func TestValueOrDefault(t *testing.T) {
@@ -31,7 +33,6 @@ func TestValueOrDefault(t *testing.T) {
 }
 
 func TestGetEnvOrDefault(t *testing.T) {
-	// Save original env
 	original := os.Getenv("TEST_VAR")
 	defer os.Setenv("TEST_VAR", original)
 
@@ -65,5 +66,108 @@ func TestModelPath(t *testing.T) {
 	want := "projects/project/locations/location/publishers/google/models/model"
 	if got != want {
 		t.Errorf("ModelPath() = %v, want %v", got, want)
+	}
+}
+
+func TestExtractResponse(t *testing.T) {
+	tests := []struct {
+		name    string
+		resp    *aiplatformpb.GenerateContentResponse
+		want    *Response
+		wantErr bool
+	}{
+		{
+			name: "valid response with metadata",
+			resp: &aiplatformpb.GenerateContentResponse{
+				Candidates: []*aiplatformpb.Candidate{
+					{
+						Content: &aiplatformpb.Content{
+							Parts: []*aiplatformpb.Part{
+								{Data: &aiplatformpb.Part_Text{Text: "Hello, world!"}},
+							},
+						},
+					},
+				},
+				UsageMetadata: &aiplatformpb.GenerateContentResponse_UsageMetadata{
+					PromptTokenCount:     100,
+					CandidatesTokenCount: 50,
+					TotalTokenCount:      150,
+				},
+			},
+			want: &Response{
+				Text:         "Hello, world!",
+				InputTokens:  100,
+				OutputTokens: 50,
+				TotalTokens:  150,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid response without metadata",
+			resp: &aiplatformpb.GenerateContentResponse{
+				Candidates: []*aiplatformpb.Candidate{
+					{
+						Content: &aiplatformpb.Content{
+							Parts: []*aiplatformpb.Part{
+								{Data: &aiplatformpb.Part_Text{Text: "Response text"}},
+							},
+						},
+					},
+				},
+				UsageMetadata: nil,
+			},
+			want: &Response{
+				Text:         "Response text",
+				InputTokens:  0,
+				OutputTokens: 0,
+				TotalTokens:  0,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "no candidates",
+			resp:    &aiplatformpb.GenerateContentResponse{Candidates: []*aiplatformpb.Candidate{}},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "empty content",
+			resp: &aiplatformpb.GenerateContentResponse{
+				Candidates: []*aiplatformpb.Candidate{
+					{Content: nil},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "empty text",
+			resp: &aiplatformpb.GenerateContentResponse{
+				Candidates: []*aiplatformpb.Candidate{
+					{
+						Content: &aiplatformpb.Content{
+							Parts: []*aiplatformpb.Part{
+								{Data: &aiplatformpb.Part_Text{Text: ""}},
+							},
+						},
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractResponse(tt.resp)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("extractResponse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && *got != *tt.want {
+				t.Errorf("extractResponse() = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

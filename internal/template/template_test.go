@@ -32,7 +32,6 @@ func TestResolveAbsolutePath(t *testing.T) {
 }
 
 func TestProcessIncludes(t *testing.T) {
-	// Create temporary files for testing in current dir to avoid outside project check
 	tempDir, err := os.MkdirTemp(".", "test_includes")
 	if err != nil {
 		t.Fatal(err)
@@ -119,64 +118,6 @@ func TestReplacePlaceholders(t *testing.T) {
 	}
 }
 
-func TestParseVarFlags(t *testing.T) {
-	tests := []struct {
-		name     string
-		args     []string
-		wantVars map[string]string
-		wantArgs []string
-		wantErr  bool
-	}{
-		{
-			name:     "no vars",
-			args:     []string{"file.md"},
-			wantVars: map[string]string{},
-			wantArgs: []string{"file.md"},
-			wantErr:  false,
-		},
-		{
-			name:     "single var",
-			args:     []string{"--var", "key=value", "file.md"},
-			wantVars: map[string]string{"key": "value"},
-			wantArgs: []string{"file.md"},
-			wantErr:  false,
-		},
-		{
-			name:    "missing value",
-			args:    []string{"--var"},
-			wantErr: true,
-		},
-		{
-			name:    "invalid format",
-			args:    []string{"--var", "invalid"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			vars, args, err := ParseVarFlags(tt.args)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseVarFlags() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr {
-				if len(vars) != len(tt.wantVars) {
-					t.Errorf("ParseVarFlags() vars len = %v, want %v", len(vars), len(tt.wantVars))
-				}
-				for k, v := range tt.wantVars {
-					if vars[k] != v {
-						t.Errorf("ParseVarFlags() vars[%s] = %v, want %v", k, vars[k], v)
-					}
-				}
-				if len(args) != len(tt.wantArgs) {
-					t.Errorf("ParseVarFlags() args = %v, want %v", args, tt.wantArgs)
-				}
-			}
-		})
-	}
-}
-
 func TestMergeVariables(t *testing.T) {
 	src1 := map[string]string{"a": "1", "b": "2"}
 	src2 := map[string]string{"b": "3", "c": "4"}
@@ -191,5 +132,112 @@ func TestMergeVariables(t *testing.T) {
 	}
 	if result["c"] != "4" {
 		t.Errorf("MergeVariables() c = %v, want 4", result["c"])
+	}
+}
+
+func TestParseCLIFlags(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		wantVars       map[string]string
+		wantOutputFile string
+		wantNoSummary  bool
+		wantArgs       []string
+		wantErr        bool
+	}{
+		{
+			name:           "no flags",
+			args:           []string{"file.md"},
+			wantVars:       map[string]string{},
+			wantOutputFile: "",
+			wantNoSummary:  false,
+			wantArgs:       []string{"file.md"},
+			wantErr:        false,
+		},
+		{
+			name:           "output flag short",
+			args:           []string{"-o", "output.txt", "file.md"},
+			wantVars:       map[string]string{},
+			wantOutputFile: "output.txt",
+			wantNoSummary:  false,
+			wantArgs:       []string{"file.md"},
+			wantErr:        false,
+		},
+		{
+			name:           "output flag long",
+			args:           []string{"--output", "result.json", "file.md"},
+			wantVars:       map[string]string{},
+			wantOutputFile: "result.json",
+			wantNoSummary:  false,
+			wantArgs:       []string{"file.md"},
+			wantErr:        false,
+		},
+		{
+			name:           "no-summary flag",
+			args:           []string{"--no-summary", "file.md"},
+			wantVars:       map[string]string{},
+			wantOutputFile: "",
+			wantNoSummary:  true,
+			wantArgs:       []string{"file.md"},
+			wantErr:        false,
+		},
+		{
+			name:           "combined flags",
+			args:           []string{"--var", "x=1", "--var", "y=2", "-o", "out.txt", "--no-summary", "file.md"},
+			wantVars:       map[string]string{"x": "1", "y": "2"},
+			wantOutputFile: "out.txt",
+			wantNoSummary:  true,
+			wantArgs:       []string{"file.md"},
+			wantErr:        false,
+		},
+		{
+			name:    "output without filename",
+			args:    []string{"-o"},
+			wantErr: true,
+		},
+		{
+			name:    "duplicate output flags",
+			args:    []string{"-o", "file1.txt", "--output", "file2.txt"},
+			wantErr: true,
+		},
+		{
+			name:    "var without value",
+			args:    []string{"--var"},
+			wantErr: true,
+		},
+		{
+			name:    "var invalid format",
+			args:    []string{"--var", "invalid"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, args, err := ParseCLIFlags(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseCLIFlags() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if len(opts.Variables) != len(tt.wantVars) {
+					t.Errorf("ParseCLIFlags() vars len = %v, want %v", len(opts.Variables), len(tt.wantVars))
+				}
+				for k, v := range tt.wantVars {
+					if opts.Variables[k] != v {
+						t.Errorf("ParseCLIFlags() vars[%s] = %v, want %v", k, opts.Variables[k], v)
+					}
+				}
+				if opts.OutputFile != tt.wantOutputFile {
+					t.Errorf("ParseCLIFlags() OutputFile = %v, want %v", opts.OutputFile, tt.wantOutputFile)
+				}
+				if opts.NoSummary != tt.wantNoSummary {
+					t.Errorf("ParseCLIFlags() NoSummary = %v, want %v", opts.NoSummary, tt.wantNoSummary)
+				}
+				if len(args) != len(tt.wantArgs) {
+					t.Errorf("ParseCLIFlags() args = %v, want %v", args, tt.wantArgs)
+				}
+			}
+		})
 	}
 }

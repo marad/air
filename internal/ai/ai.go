@@ -12,6 +12,14 @@ import (
 	"air/internal/util"
 )
 
+// Response represents the AI response with metadata
+type Response struct {
+	Text         string
+	InputTokens  int32
+	OutputTokens int32
+	TotalTokens  int32
+}
+
 func ModelPath(projectID, location, model string) string {
 	return fmt.Sprintf("projects/%s/locations/%s/publishers/google/models/%s", projectID, location, model)
 }
@@ -66,56 +74,67 @@ func buildRequest(cfg config.Config, prompt, projectID, location string) (*aipla
 	return req, nil
 }
 
-func extractText(resp *aiplatformpb.GenerateContentResponse) (string, error) {
+func extractResponse(resp *aiplatformpb.GenerateContentResponse) (*Response, error) {
 	if len(resp.Candidates) == 0 {
-		return "", fmt.Errorf("no response candidates")
+		return nil, fmt.Errorf("no response candidates")
 	}
 
 	candidate := resp.Candidates[0]
 	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
-		return "", fmt.Errorf("empty response content")
+		return nil, fmt.Errorf("empty response content")
 	}
 
-	if text := candidate.Content.Parts[0].GetText(); text != "" {
-		return text, nil
+	text := candidate.Content.Parts[0].GetText()
+	if text == "" {
+		return nil, fmt.Errorf("no text in response")
 	}
 
-	return "", fmt.Errorf("no text in response")
+	result := &Response{
+		Text: text,
+	}
+
+	if resp.UsageMetadata != nil {
+		result.InputTokens = resp.UsageMetadata.PromptTokenCount
+		result.OutputTokens = resp.UsageMetadata.CandidatesTokenCount
+		result.TotalTokens = resp.UsageMetadata.TotalTokenCount
+	}
+
+	return result, nil
 }
 
-func CallVertexAI(ctx context.Context, cfg config.Config, prompt string) (string, error) {
+func CallVertexAI(ctx context.Context, cfg config.Config, prompt string) (*Response, error) {
 	projectID, location, err := loadEnvironment()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	client, err := aiplatform.NewPredictionClient(ctx)
 	if err != nil {
-		return "", fmt.Errorf("creating AI client: %w", err)
+		return nil, fmt.Errorf("creating AI client: %w", err)
 	}
 	defer client.Close()
 
 	req, err := buildRequest(cfg, prompt, projectID, location)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	resp, err := client.GenerateContent(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("generating content: %w", err)
+		return nil, fmt.Errorf("generating content: %w", err)
 	}
 
-	text, err := extractText(resp)
+	response, err := extractResponse(resp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Validate response against schema if provided (just warn, don't fail)
 	if cfg.ResponseSchema != nil {
-		if err := schema.ValidateResponse(text, cfg.ResponseSchema); err != nil {
+		if err := schema.ValidateResponse(response.Text, cfg.ResponseSchema); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: response does not match schema: %v\n", err)
 		}
 	}
 
-	return text, nil
+	return response, nil
 }

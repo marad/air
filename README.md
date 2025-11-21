@@ -7,11 +7,26 @@ It basically sends the request to AI and shows its response.
 
 ## Usage 
 
-The usage simple - just invoke air with your prompt template:
+Basic usage - just invoke air with your prompt template:
 
 ```bash
-> air prompt_template.md
-# ai response
+./air prompt_template.md
+```
+
+With options:
+
+```bash
+# Save output to file
+./air prompt.md -o output.txt
+
+# Hide request summary
+./air prompt.md --no-summary
+
+# Pass variables
+./air prompt.md --var name=Alice --var task=coding
+
+# Combine options
+./air prompt.md --var x=1 -o out.txt --no-summary
 ```
 
 ## Prompt Templates
@@ -159,6 +174,49 @@ This should produce a response like:
 
 If the response doesn't match the schema, a warning will be printed to stderr, but the response is still returned.
 
+## Output Options
+
+### Saving Output to File
+
+Save the AI response to a file instead of displaying it:
+
+```bash
+./air template.md -o output.txt
+./air template.md --output response.json
+```
+
+The file will be created or overwritten if it exists.
+
+### Request Summary
+
+After each request, AIR displays a summary with token usage:
+
+```
+---
+Request Summary
+Model: gemini-2.0-flash-001
+Input tokens: 1234
+Output tokens: 567
+Total tokens: 1801
+---
+```
+
+To hide the summary:
+
+```bash
+./air template.md --no-summary
+```
+
+The summary is printed to stderr, so it won't interfere with piping output.
+
+### Combining Options
+
+You can combine multiple options:
+
+```bash
+./air template.md --var name=Alice -o result.txt --no-summary
+```
+
 ## Troubleshooting
 
 ### Common Issues
@@ -185,6 +243,11 @@ If the response doesn't match the schema, a warning will be printed to stderr, b
 **"include path is outside the project directory"**
 - Include paths must be within the project root
 - Use relative paths from the template file's directory
+
+**"Error writing output"**
+- Check file path is valid
+- Ensure you have write permissions for the directory
+- Verify disk space is available
 
 **Exit Codes:**
 - 0: Success
