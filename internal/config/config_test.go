@@ -68,27 +68,6 @@ Hello world`,
 	}
 }
 
-func TestValidateModel(t *testing.T) {
-	tests := []struct {
-		name    string
-		model   string
-		wantErr bool
-	}{
-		{"valid model", "gemini-2.0-flash-001", false},
-		{"valid model pro", "gemini-1.5-pro-002", false},
-		{"invalid model", "invalid-model", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateModel(tt.model)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateModel() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestParseHarmCategory(t *testing.T) {
 	tests := []struct {
 		name     string

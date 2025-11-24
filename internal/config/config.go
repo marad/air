@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
 	aiplatform "cloud.google.com/go/aiplatform/apiv1/aiplatformpb"
@@ -47,12 +46,6 @@ type Config struct {
 }
 
 func (c *Config) Validate() error {
-	if c.Model != "" {
-		if err := ValidateModel(c.Model); err != nil {
-			return fmt.Errorf("model: %w", err)
-		}
-	}
-
 	// Validate safety settings without building (BuildSafetySettings will be called later)
 	for cat, thresh := range c.SafetySettings {
 		if _, err := ParseHarmCategory(cat); err != nil {
@@ -147,22 +140,6 @@ func ParseFrontmatter(content []byte) (Config, string, error) {
 	}
 
 	return config, strings.TrimSpace(string(markdown)), nil
-}
-
-// ValidateModel checks if the given model name is supported by the AI service.
-func ValidateModel(model string) error {
-	supportedModels := []string{
-		"gemini-2.0-flash-001",
-		"gemini-1.5-pro-002",
-		"gemini-1.5-pro-001",
-		"gemini-1.5-flash-002",
-		"gemini-1.5-flash-001",
-	}
-
-	if !slices.Contains(supportedModels, model) {
-		return fmt.Errorf("unsupported model: %s (supported: %v)", model, supportedModels)
-	}
-	return nil
 }
 
 // ParseHarmCategory converts a string harm category to the protobuf enum value.
