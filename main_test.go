@@ -273,6 +273,175 @@ func TestRun_WithVariables(t *testing.T) {
 	}
 }
 
+func TestRun_ShowPromptOnly(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		fileContent    string
+		wantOutput     string
+		wantInFile     string
+		wantFileName   string
+	}{
+		{
+			name:        "to stdout",
+			args:        []string{"--show-prompt-only", "template.md"},
+			fileContent: "---\ntemperature: 0.5\n---\nTest prompt with {{var|default}}",
+			wantOutput:  "Test prompt with default",
+		},
+		{
+			name:         "to output file",
+			args:         []string{"--show-prompt-only", "-o", "prompt.txt", "template.md"},
+			fileContent:  "Final prompt {{name|Alice}}",
+			wantInFile:   "Final prompt Alice",
+			wantFileName: "prompt.txt",
+		},
+		{
+			name:        "with no-summary flag",
+			args:        []string{"--show-prompt-only", "--no-summary", "template.md"},
+			fileContent: "Simple prompt",
+			wantOutput:  "Simple prompt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout := &bytes.Buffer{}
+			stderr := &bytes.Buffer{}
+			writtenFile := ""
+			writtenContent := ""
+
+			opts := createTestOptions()
+			opts.args = tt.args
+			opts.stdout = stdout
+			opts.stderr = stderr
+			opts.readFile = func(path string) ([]byte, error) {
+				return []byte(tt.fileContent), nil
+			}
+			opts.writeFile = func(path, content string) error {
+				writtenFile = path
+				writtenContent = content
+				return nil
+			}
+
+			aiCalled := false
+			opts.callAI = func(ctx context.Context, cfg config.Config, prompt string) (*ai.Response, error) {
+				aiCalled = true
+				return nil, errors.New("should not be called")
+			}
+
+			err := run(opts)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if aiCalled {
+				t.Error("AI should not have been called with --show-prompt-only flag")
+			}
+
+			// Check stdout output
+			if tt.wantOutput != "" {
+				output := stdout.String()
+				if !strings.Contains(output, tt.wantOutput) {
+					t.Errorf("expected output to contain %q, got: %s", tt.wantOutput, output)
+				}
+			}
+
+			// Check file output
+			if tt.wantFileName != "" {
+				if writtenFile != tt.wantFileName {
+					t.Errorf("expected file %q, got: %s", tt.wantFileName, writtenFile)
+				}
+				if !strings.Contains(writtenContent, tt.wantInFile) {
+					t.Errorf("expected content to contain %q, got: %s", tt.wantInFile, writtenContent)
+				}
+			}
+
+			// Check that summary was NOT displayed
+			summaryOutput := stderr.String()
+			if strings.Contains(summaryOutput, "Request Summary") {
+				t.Errorf("expected no summary with --show-prompt-only flag, got: %s", summaryOutput)
+			}
+		})
+	}
+}
+
+func TestRun_ShowPromptOnly_ErrorCases(t *testing.T) {
+	tests := []struct {
+		name         string
+		args         []string
+		fileContent  string
+		wantExitCode int
+		wantErrMsg   string
+	}{
+		{
+			name:         "missing variable",
+			args:         []string{"--show-prompt-only", "template.md"},
+			fileContent:  "Hello {{name}}",
+			wantExitCode: ExitTemplateError,
+			wantErrMsg:   "undefined variables",
+		},
+		{
+			name:         "invalid config",
+			args:         []string{"--show-prompt-only", "template.md"},
+			fileContent:  "---\nsafetySettings:\n  hate_speech: INVALID_THRESHOLD\n---\nPrompt",
+			wantExitCode: ExitConfigError,
+			wantErrMsg:   "invalid configuration",
+		},
+		{
+			name:         "write file error",
+			args:         []string{"--show-prompt-only", "-o", "output.txt", "template.md"},
+			fileContent:  "Simple prompt",
+			wantExitCode: ExitFileError,
+			wantErrMsg:   "writing output",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := createTestOptions()
+			opts.args = tt.args
+			opts.readFile = func(path string) ([]byte, error) {
+				return []byte(tt.fileContent), nil
+			}
+
+			// For write file error test, simulate write failure
+			if tt.name == "write file error" {
+				opts.writeFile = func(path, content string) error {
+					return errors.New("permission denied")
+				}
+			}
+
+			aiCalled := false
+			opts.callAI = func(ctx context.Context, cfg config.Config, prompt string) (*ai.Response, error) {
+				aiCalled = true
+				return nil, errors.New("should not be called")
+			}
+
+			err := run(opts)
+			if err == nil {
+				t.Fatal("expected error but got none")
+			}
+
+			if aiCalled {
+				t.Error("AI should not have been called")
+			}
+
+			exitErr, ok := err.(*exitError)
+			if !ok {
+				t.Fatalf("expected exitError, got %T", err)
+			}
+
+			if exitErr.code != tt.wantExitCode {
+				t.Errorf("expected exit code %d, got %d", tt.wantExitCode, exitErr.code)
+			}
+
+			if !strings.Contains(exitErr.Error(), tt.wantErrMsg) {
+				t.Errorf("expected error message to contain %q, got: %s", tt.wantErrMsg, exitErr.Error())
+			}
+		})
+	}
+}
+
 func TestRun_WriteFileError(t *testing.T) {
 	opts := createTestOptions()
 	opts.args = []string{"-o", "output.txt", "template.md"}
