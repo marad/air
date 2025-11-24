@@ -22,6 +22,9 @@ With options:
 # Hide request summary
 ./air prompt.md --no-summary
 
+# Show only the generated prompt (no AI call)
+./air prompt.md --show-prompt-only
+
 # Pass variables
 ./air prompt.md --var name=Alice --var task=coding
 
@@ -208,6 +211,28 @@ To hide the summary:
 ```
 
 The summary is printed to stderr, so it won't interfere with piping output.
+
+### Showing Prompt Only
+
+During prompt development, you may want to see the final processed prompt without making an actual AI request. Use the `--show-prompt-only` flag to:
+
+- Generate and display the final prompt after all processing (includes, variable substitution)
+- Skip the AI call entirely (no connection to Vertex AI)
+- Work completely offline
+- Useful for debugging and verifying your prompt templates
+
+```bash
+# Display the final prompt to stdout
+./air template.md --show-prompt-only
+
+# Save the final prompt to a file
+./air template.md --show-prompt-only -o final_prompt.txt
+
+# Combine with variables to see the result
+./air template.md --var name=Alice --show-prompt-only
+```
+
+This mode works entirely locally and doesn't require `GOOGLE_CLOUD_PROJECT` to be set.
 
 ### Combining Options
 
