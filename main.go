@@ -72,6 +72,14 @@ func writeOutputToFile(filename, content string) error {
 	return nil
 }
 
+func (opts runOptions) writeOutput(cliOpts *template.CLIOptions, content string) error {
+	if cliOpts.OutputFile != "" {
+		return opts.writeFile(cliOpts.OutputFile, content)
+	}
+	fmt.Fprintln(opts.stdout, content)
+	return nil
+}
+
 func run(opts runOptions) error {
 	cliOpts, args, err := template.ParseCLIFlags(opts.args)
 	if err != nil {
@@ -112,6 +120,14 @@ func run(opts runOptions) error {
 		return &exitError{code: ExitTemplateError, err: fmt.Errorf("replacing placeholders: %w", err)}
 	}
 
+	// If --show-prompt-only flag is set, just output the prompt and exit
+	if cliOpts.ShowPromptOnly {
+		if err := opts.writeOutput(cliOpts, finalMarkdown); err != nil {
+			return &exitError{code: ExitFileError, err: fmt.Errorf("writing output: %w", err)}
+		}
+		return nil
+	}
+
 	ctx := context.Background()
 	response, err := opts.callAI(ctx, cfg, finalMarkdown)
 	if err != nil {
@@ -123,13 +139,8 @@ func run(opts runOptions) error {
 		output = schema.FormatResponse(response.Text)
 	}
 
-	if cliOpts.OutputFile != "" {
-		err := opts.writeFile(cliOpts.OutputFile, output)
-		if err != nil {
-			return &exitError{code: ExitFileError, err: fmt.Errorf("writing output: %w", err)}
-		}
-	} else {
-		fmt.Fprintln(opts.stdout, output)
+	if err := opts.writeOutput(cliOpts, output); err != nil {
+		return &exitError{code: ExitFileError, err: fmt.Errorf("writing output: %w", err)}
 	}
 
 	if !cliOpts.NoSummary {

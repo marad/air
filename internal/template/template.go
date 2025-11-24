@@ -161,9 +161,10 @@ func ReplacePlaceholders(content string, variables map[string]string) (string, e
 }
 
 type CLIOptions struct {
-	Variables  map[string]string // --var flags
-	OutputFile string            // -o, --output
-	NoSummary  bool              // --no-summary
+	Variables      map[string]string // --var flags
+	OutputFile     string            // -o, --output
+	NoSummary      bool              // --no-summary
+	ShowPromptOnly bool              // --show-prompt-only
 }
 
 func ParseCLIFlags(args []string) (*CLIOptions, []string, error) {
@@ -205,6 +206,8 @@ func ParseCLIFlags(args []string) (*CLIOptions, []string, error) {
 			opts.OutputFile = args[i]
 		case "--no-summary":
 			opts.NoSummary = true
+		case "--show-prompt-only":
+			opts.ShowPromptOnly = true
 		default:
 			remaining = append(remaining, arg)
 		}
