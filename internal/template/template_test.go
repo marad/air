@@ -137,58 +137,74 @@ func TestMergeVariables(t *testing.T) {
 
 func TestParseCLIFlags(t *testing.T) {
 	tests := []struct {
-		name           string
-		args           []string
-		wantVars       map[string]string
-		wantOutputFile string
-		wantNoSummary  bool
-		wantArgs       []string
-		wantErr        bool
+		name              string
+		args              []string
+		wantVars          map[string]string
+		wantOutputFile    string
+		wantNoSummary     bool
+		wantShowPromptOnly bool
+		wantArgs          []string
+		wantErr           bool
 	}{
 		{
-			name:           "no flags",
-			args:           []string{"file.md"},
-			wantVars:       map[string]string{},
-			wantOutputFile: "",
-			wantNoSummary:  false,
-			wantArgs:       []string{"file.md"},
-			wantErr:        false,
+			name:              "no flags",
+			args:              []string{"file.md"},
+			wantVars:          map[string]string{},
+			wantOutputFile:    "",
+			wantNoSummary:     false,
+			wantShowPromptOnly: false,
+			wantArgs:          []string{"file.md"},
+			wantErr:           false,
 		},
 		{
-			name:           "output flag short",
-			args:           []string{"-o", "output.txt", "file.md"},
-			wantVars:       map[string]string{},
-			wantOutputFile: "output.txt",
-			wantNoSummary:  false,
-			wantArgs:       []string{"file.md"},
-			wantErr:        false,
+			name:              "output flag short",
+			args:              []string{"-o", "output.txt", "file.md"},
+			wantVars:          map[string]string{},
+			wantOutputFile:    "output.txt",
+			wantNoSummary:     false,
+			wantShowPromptOnly: false,
+			wantArgs:          []string{"file.md"},
+			wantErr:           false,
 		},
 		{
-			name:           "output flag long",
-			args:           []string{"--output", "result.json", "file.md"},
-			wantVars:       map[string]string{},
-			wantOutputFile: "result.json",
-			wantNoSummary:  false,
-			wantArgs:       []string{"file.md"},
-			wantErr:        false,
+			name:              "output flag long",
+			args:              []string{"--output", "result.json", "file.md"},
+			wantVars:          map[string]string{},
+			wantOutputFile:    "result.json",
+			wantNoSummary:     false,
+			wantShowPromptOnly: false,
+			wantArgs:          []string{"file.md"},
+			wantErr:           false,
 		},
 		{
-			name:           "no-summary flag",
-			args:           []string{"--no-summary", "file.md"},
-			wantVars:       map[string]string{},
-			wantOutputFile: "",
-			wantNoSummary:  true,
-			wantArgs:       []string{"file.md"},
-			wantErr:        false,
+			name:              "no-summary flag",
+			args:              []string{"--no-summary", "file.md"},
+			wantVars:          map[string]string{},
+			wantOutputFile:    "",
+			wantNoSummary:     true,
+			wantShowPromptOnly: false,
+			wantArgs:          []string{"file.md"},
+			wantErr:           false,
 		},
 		{
-			name:           "combined flags",
-			args:           []string{"--var", "x=1", "--var", "y=2", "-o", "out.txt", "--no-summary", "file.md"},
-			wantVars:       map[string]string{"x": "1", "y": "2"},
-			wantOutputFile: "out.txt",
-			wantNoSummary:  true,
-			wantArgs:       []string{"file.md"},
-			wantErr:        false,
+			name:              "show-prompt-only flag",
+			args:              []string{"--show-prompt-only", "file.md"},
+			wantVars:          map[string]string{},
+			wantOutputFile:    "",
+			wantNoSummary:     false,
+			wantShowPromptOnly: true,
+			wantArgs:          []string{"file.md"},
+			wantErr:           false,
+		},
+		{
+			name:              "combined flags",
+			args:              []string{"--var", "x=1", "--var", "y=2", "-o", "out.txt", "--no-summary", "file.md"},
+			wantVars:          map[string]string{"x": "1", "y": "2"},
+			wantOutputFile:    "out.txt",
+			wantNoSummary:     true,
+			wantShowPromptOnly: false,
+			wantArgs:          []string{"file.md"},
+			wantErr:           false,
 		},
 		{
 			name:    "output without filename",
@@ -233,6 +249,9 @@ func TestParseCLIFlags(t *testing.T) {
 				}
 				if opts.NoSummary != tt.wantNoSummary {
 					t.Errorf("ParseCLIFlags() NoSummary = %v, want %v", opts.NoSummary, tt.wantNoSummary)
+				}
+				if opts.ShowPromptOnly != tt.wantShowPromptOnly {
+					t.Errorf("ParseCLIFlags() ShowPromptOnly = %v, want %v", opts.ShowPromptOnly, tt.wantShowPromptOnly)
 				}
 				if len(args) != len(tt.wantArgs) {
 					t.Errorf("ParseCLIFlags() args = %v, want %v", args, tt.wantArgs)
